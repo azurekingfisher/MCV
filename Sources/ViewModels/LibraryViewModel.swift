@@ -7,6 +7,11 @@ class LibraryViewModel: ObservableObject {
     @Published var selectedFolderURL: URL?
     @Published var displayMode: DisplayMode = .thumbnailAndTitle
     @Published var isScanning: Bool = false
+    @Published var selectedIndex: Int = 0
+    @Published var columnsCount: Int = 4
+    
+    var openSelectedBookAction: ((ComicBook) -> Void)?
+    private var keyMonitor: Any?
     
     enum DisplayMode {
         case thumbnailAndTitle
@@ -22,6 +27,54 @@ class LibraryViewModel: ObservableObject {
         self.zipService = zipService
         self.cacheService = cacheService
         loadLastSelectedFolder()
+    }
+    
+    deinit {
+        removeKeyMonitor()
+    }
+    
+    func installKeyMonitor() {
+        removeKeyMonitor()
+        
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self, !self.books.isEmpty else { return event }
+            
+            let count = self.books.count
+            let columns = max(1, self.columnsCount)
+            
+            switch event.keyCode {
+            case 123: // ← 왼쪽 방향키
+                self.selectedIndex = max(0, self.selectedIndex - 1)
+                return nil
+            case 124: // → 오른쪽 방향키
+                self.selectedIndex = min(count - 1, self.selectedIndex + 1)
+                return nil
+            case 126: // ↑ 위 방향키
+                self.selectedIndex = max(0, self.selectedIndex - columns)
+                return nil
+            case 125: // ↓ 아래 방향키
+                self.selectedIndex = min(count - 1, self.selectedIndex + columns)
+                return nil
+            case 36, 76, 49: // 엔터 / 스페이스 키 (Main Enter / Keypad Enter / Space)
+                if self.selectedIndex < count {
+                    let targetBook = self.books[self.selectedIndex]
+                    DispatchQueue.main.async {
+                        self.openSelectedBookAction?(targetBook)
+                    }
+                }
+                return nil
+            default:
+                break
+            }
+            return event
+        }
+    }
+    
+    func removeKeyMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
+        }
     }
     
     private func loadLastSelectedFolder() {
@@ -85,6 +138,7 @@ class LibraryViewModel: ObservableObject {
                 
                 DispatchQueue.main.async {
                     self.books = newBooks
+                    self.selectedIndex = 0
                     self.isScanning = false
                     // 썸네일 로딩 시작
                     self.loadThumbnails()

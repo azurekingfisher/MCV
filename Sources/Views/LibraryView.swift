@@ -2,7 +2,7 @@ import SwiftUI
 
 struct LibraryView: View {
     @StateObject private var viewModel = LibraryViewModel()
-    @State private var selectedBook: ComicBook?
+    @State private var selectedBookForNavigation: ComicBook?
     
     // 무채색 배경
     private let backgroundColor = Color(NSColor.windowBackgroundColor)
@@ -27,16 +27,33 @@ struct LibraryView: View {
                         .controlSize(.large)
                     }
                 } else {
-                    ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 20)], spacing: 30) {
-                            ForEach(viewModel.books) { book in
-                                NavigationLink(value: book) {
-                                    BookItemView(book: book, viewModel: viewModel)
+                    GeometryReader { geometry in
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 20)], spacing: 30) {
+                                    ForEach(Array(viewModel.books.enumerated()), id: \.element.id) { index, book in
+                                        BookItemView(book: book, viewModel: viewModel, isSelected: index == viewModel.selectedIndex)
+                                            .id(book.id)
+                                            .onTapGesture {
+                                                viewModel.selectedIndex = index
+                                                selectedBookForNavigation = book
+                                            }
+                                    }
                                 }
-                                .buttonStyle(.plain) // 기본 버튼 스타일 제거
+                                .padding(20)
+                            }
+                            .onChange(of: geometry.size.width) { width in
+                                let cols = max(1, Int((width - 20) / 200))
+                                viewModel.columnsCount = cols
+                            }
+                            .onChange(of: viewModel.selectedIndex) { newIndex in
+                                if newIndex < viewModel.books.count {
+                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                        proxy.scrollTo(viewModel.books[newIndex].id, anchor: .center)
+                                    }
+                                }
                             }
                         }
-                        .padding(20)
                     }
                 }
                 
@@ -57,8 +74,22 @@ struct LibraryView: View {
                     }
                 }
             }
-            .navigationDestination(for: ComicBook.self) { book in
-                ViewerView(book: book, allBooks: viewModel.books)
+            .navigationDestination(isPresented: Binding(
+                get: { selectedBookForNavigation != nil },
+                set: { if !$0 { selectedBookForNavigation = nil } }
+            )) {
+                if let book = selectedBookForNavigation {
+                    ViewerView(book: book, allBooks: viewModel.books)
+                }
+            }
+            .onAppear {
+                viewModel.installKeyMonitor()
+                viewModel.openSelectedBookAction = { book in
+                    selectedBookForNavigation = book
+                }
+            }
+            .onDisappear {
+                viewModel.removeKeyMonitor()
             }
         }
     }
@@ -67,6 +98,7 @@ struct LibraryView: View {
 struct BookItemView: View {
     let book: ComicBook
     @ObservedObject var viewModel: LibraryViewModel
+    let isSelected: Bool
     
     var body: some View {
         VStack {
@@ -85,15 +117,21 @@ struct BookItemView: View {
                     }
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 8))
-                .shadow(color: .black.opacity(0.3), radius: 5, x: 0, y: 3)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 3.5)
+                )
+                .scaleEffect(isSelected ? 1.04 : 1.0)
+                .shadow(color: isSelected ? Color.blue.opacity(0.6) : Color.black.opacity(0.3), radius: isSelected ? 8 : 4, x: 0, y: isSelected ? 4 : 2)
+                .animation(.easeOut(duration: 0.15), value: isSelected)
             
             Text(book.title)
                 .font(.callout)
+                .fontWeight(isSelected ? .semibold : .regular)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
-                .foregroundColor(.primary)
+                .foregroundColor(isSelected ? .blue : .primary)
                 .frame(height: 40, alignment: .top)
         }
-        // Hover effect could be added here
     }
 }
