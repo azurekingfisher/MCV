@@ -9,7 +9,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // mcv_icon.png 적용 (Dock 및 About 창 공통)
         if let iconURL = Bundle.module.url(forResource: "mcv_icon", withExtension: "png") ?? locateIconURL(),
-           let iconImage = NSImage(contentsOfURL: iconURL) {
+           let iconImage = NSImage(contentsOf: iconURL) {
             NSApp.applicationIconImage = iconImage
         }
         
