@@ -39,6 +39,11 @@ class LibraryViewModel: ObservableObject {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self, !self.books.isEmpty else { return event }
             
+            // 뷰어 모드가 활성화되어 있으면 책장 키 모니터는 작동하지 않고 통과시킴
+            if ViewerViewModel.current != nil {
+                return event
+            }
+            
             let count = self.books.count
             let columns = max(1, self.columnsCount)
             
