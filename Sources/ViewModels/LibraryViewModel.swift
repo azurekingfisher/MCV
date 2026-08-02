@@ -134,7 +134,12 @@ class LibraryViewModel: ObservableObject {
                 
                 let zipFiles = contents.filter { $0.pathExtension.lowercased() == "zip" }
                 
-                let newBooks = zipFiles.map { ComicBook(url: $0) }
+                // macOS Finder 자연어 정렬 (가나다/알파벳/숫자 순서대로 정렬)
+                let sortedZipFiles = zipFiles.sorted { url1, url2 in
+                    url1.lastPathComponent.localizedStandardCompare(url2.lastPathComponent) == .orderedAscending
+                }
+                
+                let newBooks = sortedZipFiles.map { ComicBook(url: $0) }
                 
                 DispatchQueue.main.async {
                     self.books = newBooks
