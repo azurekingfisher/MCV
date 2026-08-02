@@ -139,11 +139,7 @@ class ViewerViewModel: ObservableObject {
             case 29: // 0 키 (알파벳 상단 키패드 - 배율 초기화)
                 self.resetZoom()
                 return nil
-            case 53: // Esc 키 (전체화면 모드 여부와 관계없이 책장으로 돌아가기)
-                let targetWindow = self.window ?? NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isKeyWindow })
-                if let targetWindow = targetWindow, targetWindow.styleMask.contains(.fullScreen) {
-                    targetWindow.toggleFullScreen(nil)
-                }
+            case 53: // Esc 키 (전체화면 상태를 유지하면서 책장으로 돌아가기)
                 self.dismissAction?()
                 return nil
             case 3: // F 키 (영문 F / 한글 ㄹ) - 전체화면
