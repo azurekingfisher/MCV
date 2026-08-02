@@ -15,6 +15,11 @@ class ViewerViewModel: ObservableObject {
     @Published var isRightToLeft: Bool = true { didSet { updateCurrentPages() } } // 만화책은 보통 우측에서 좌측으로 읽음
     @Published var isSpreadInverted: Bool = false { didSet { updateCurrentPages() } }
     @Published var isFitToWidth: Bool = false
+    @Published var sharpenLevel: SharpenLevel = SharpenLevel(rawValue: UserDefaults.standard.string(forKey: "sharpenLevel") ?? "끄기") ?? .off {
+        didSet {
+            UserDefaults.standard.set(sharpenLevel.rawValue, forKey: "sharpenLevel")
+        }
+    }
     
     // Zoom & Pan state
     @Published var scale: CGFloat = 1.0
@@ -372,6 +377,25 @@ class ViewerViewModel: ObservableObject {
             showVolumeOverlay(message: self.book.title)
         } else {
             showVolumeOverlay(message: forward ? "마지막 권입니다." : "첫 권입니다.")
+        }
+    }
+}
+
+// MARK: - Sharpen Level Enum
+enum SharpenLevel: String, CaseIterable, Identifiable {
+    case off = "끄기"
+    case low = "약하게"
+    case medium = "보통"
+    case high = "강하게"
+    
+    var id: String { rawValue }
+    
+    var intensity: Float {
+        switch self {
+        case .off: return 0.0
+        case .low: return 0.4
+        case .medium: return 0.8
+        case .high: return 1.4
         }
     }
 }

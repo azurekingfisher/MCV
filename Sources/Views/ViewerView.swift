@@ -100,7 +100,7 @@ struct ViewerView: View {
                 HStack(spacing: 0) {
                     ForEach(viewModel.currentPages) { page in
                         if let image = page.image, image.size.height > 0 {
-                            LanczosImageView(image: image)
+                            LanczosImageView(image: image, sharpenIntensity: viewModel.sharpenLevel.intensity)
                                 .aspectRatio(image.size.width / image.size.height, contentMode: .fit)
                         } else {
                             ProgressView()
@@ -159,13 +159,30 @@ struct ViewerView: View {
             
             Spacer()
             
-            // 설정 메뉴 (단면/양면 등)
+            // 설정 메뉴 (단면/양면, 샤픈 등)
             Menu {
                 Toggle("가로로 꽉 차게 보기 (H)", isOn: $viewModel.isFitToWidth)
                 Toggle("양면 보기", isOn: $viewModel.isTwoPageMode)
                 Toggle("오른쪽에서 왼쪽으로 읽기", isOn: $viewModel.isRightToLeft)
                 if viewModel.isTwoPageMode {
                     Toggle("좌우 반전", isOn: $viewModel.isSpreadInverted)
+                }
+                
+                Divider()
+                
+                Menu("선명도 (샤픈 필터)") {
+                    ForEach(SharpenLevel.allCases) { level in
+                        Button(action: {
+                            viewModel.sharpenLevel = level
+                        }) {
+                            HStack {
+                                Text(level.rawValue)
+                                if viewModel.sharpenLevel == level {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
                 }
             } label: {
                 Image(systemName: "gearshape")
@@ -210,13 +227,20 @@ struct WindowAccessor: NSViewRepresentable {
     }
 }
 
-// MARK: - Lanczos & Anti-Aliased High Quality Image View
+// MARK: - Lanczos & Anti-Aliased High Quality Image View with GPU Sharpening
 final class LanczosNSImageView: NSView {
     var image: NSImage? {
         didSet {
             needsDisplay = true
         }
     }
+    var sharpenIntensity: Float = 0.0 {
+        didSet {
+            needsDisplay = true
+        }
+    }
+    
+    private static let ciContext = CIContext(options: [.useSoftwareRenderer: false])
     
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -229,6 +253,23 @@ final class LanczosNSImageView: NSView {
         let targetRect = self.bounds
         guard targetRect.width > 0 && targetRect.height > 0 else { return }
         
+        // 샤픈 필터 적용 (Core Image GPU 가속)
+        if sharpenIntensity > 0,
+           let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            let ciImage = CIImage(cgImage: cgImage)
+            if let filter = CIFilter(name: "CISharpenLuminance") {
+                filter.setValue(ciImage, forKey: kCIInputImageKey)
+                filter.setValue(sharpenIntensity, forKey: kCIInputSharpnessKey)
+                
+                if let outputImage = filter.outputImage,
+                   let outputCGImage = LanczosNSImageView.ciContext.createCGImage(outputImage, from: ciImage.extent) {
+                    let sharpenedImage = NSImage(cgImage: outputCGImage, size: targetRect.size)
+                    sharpenedImage.draw(in: targetRect)
+                    return
+                }
+            }
+        }
+        
         // AppKit 표준 드로잉: 좌표계 왜곡 없이 Lanczos 보간법으로 그리기
         image.draw(in: targetRect)
     }
@@ -236,15 +277,20 @@ final class LanczosNSImageView: NSView {
 
 struct LanczosImageView: NSViewRepresentable {
     let image: NSImage
+    var sharpenIntensity: Float = 0.0
     
     func makeNSView(context: Context) -> LanczosNSImageView {
         let view = LanczosNSImageView()
         view.image = image
+        view.sharpenIntensity = sharpenIntensity
         return view
     }
     
     func updateNSView(_ nsView: LanczosNSImageView, context: Context) {
         nsView.image = image
+        if nsView.sharpenIntensity != sharpenIntensity {
+            nsView.sharpenIntensity = sharpenIntensity
+        }
     }
 }
 
