@@ -119,9 +119,8 @@ struct ViewerCommands: Commands {
             Button("책장으로 돌아가기") {
                 if let window = NSApp.windows.first(where: { $0.isKeyWindow }), window.styleMask.contains(.fullScreen) {
                     NSApp.sendAction(#selector(NSWindow.toggleFullScreen(_:)), to: nil, from: nil)
-                } else {
-                    ViewerViewModel.current?.dismissAction?()
                 }
+                ViewerViewModel.current?.dismissAction?()
             }
             .keyboardShortcut(.escape, modifiers: [])
         }
