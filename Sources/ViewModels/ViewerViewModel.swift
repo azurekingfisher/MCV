@@ -70,6 +70,7 @@ class ViewerViewModel: ObservableObject {
     // Esc 키 및 키보드 단축키 모니터
     var dismissAction: (() -> Void)?
     var scrollAction: ((CGFloat) -> Void)?
+    var scrollToTopAction: (() -> Void)?
     weak var window: NSWindow?
     private var keyMonitor: Any?
     
@@ -308,8 +309,17 @@ class ViewerViewModel: ObservableObject {
         
         self.currentPages = newPages
         
+        // 페이지 변경 시 가로 꽉 참 스크롤을 항상 맨 위로 리셋
+        scrollToTop()
+        
         // 메모리 관리를 위해 앞뒤 2페이지만 캐싱하고 나머지는 삭제
         manageCache()
+    }
+    
+    func scrollToTop() {
+        DispatchQueue.main.async {
+            self.scrollToTopAction?()
+        }
     }
     
     private func getPage(at index: Int) -> ComicPage {

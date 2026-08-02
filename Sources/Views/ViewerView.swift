@@ -315,6 +315,13 @@ struct FitToWidthScrollView<Content: View>: NSViewRepresentable {
                     scrollView.reflectScrolledClipView(contentView)
                 }
             }
+
+            viewModel.scrollToTopAction = { [weak scrollView] in
+                guard let scrollView = scrollView else { return }
+                let contentView = scrollView.contentView
+                contentView.scroll(to: NSPoint(x: 0, y: 0))
+                scrollView.reflectScrolledClipView(contentView)
+            }
         }
     }
 }
