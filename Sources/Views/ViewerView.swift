@@ -206,9 +206,7 @@ struct WindowAccessor: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: CustomWindowNSView, context: Context) {
-        if let window = nsView.window {
-            callback(window)
-        }
+        // 이미 viewDidMoveToWindow에서 설정되었으므로 updateNSView에서는 상태를 변경하지 않음 (무한 루프 방지)
     }
 }
 
@@ -288,7 +286,6 @@ struct FitToWidthScrollView<Content: View>: NSViewRepresentable {
         if let hostingView = nsView.documentView as? NSHostingView<Content> {
             hostingView.rootView = content
         }
-        context.coordinator.setupScrollAction(for: nsView, viewModel: viewModel)
     }
 
     func makeCoordinator() -> Coordinator {
