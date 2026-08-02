@@ -60,7 +60,7 @@ class ViewerViewModel: ObservableObject {
     @Published var totalPages: Int = 0
     
     // UI state
-    @Published var isControlsVisible: Bool = true
+    @Published var isControlsVisible: Bool = false
     
     private let zipService: ZipArchiveServiceProtocol
     private var entries: [String] = []
