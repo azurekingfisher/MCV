@@ -7,6 +7,10 @@ struct LibraryView: View {
     // 무채색 배경
     private let backgroundColor = Color(NSColor.windowBackgroundColor)
     
+    private var gridColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(minimum: 140, maximum: 200), spacing: 20), count: max(1, viewModel.columnsCount))
+    }
+    
     var body: some View {
         NavigationStack {
             ZStack {
@@ -30,7 +34,7 @@ struct LibraryView: View {
                     GeometryReader { geometry in
                         ScrollViewReader { proxy in
                             ScrollView {
-                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 20)], spacing: 30) {
+                                LazyVGrid(columns: gridColumns, spacing: 30) {
                                     ForEach(Array(viewModel.books.enumerated()), id: \.element.id) { index, book in
                                         BookItemView(book: book, viewModel: viewModel, isSelected: index == viewModel.selectedIndex)
                                             .id(book.id)
@@ -42,9 +46,11 @@ struct LibraryView: View {
                                 }
                                 .padding(20)
                             }
+                            .onAppear {
+                                updateColumns(width: geometry.size.width)
+                            }
                             .onChange(of: geometry.size.width) { width in
-                                let cols = max(1, Int((width - 20) / 200))
-                                viewModel.columnsCount = cols
+                                updateColumns(width: width)
                             }
                             .onChange(of: viewModel.selectedIndex) { newIndex in
                                 if newIndex < viewModel.books.count {
@@ -91,6 +97,14 @@ struct LibraryView: View {
             .onDisappear {
                 viewModel.removeKeyMonitor()
             }
+        }
+    }
+    
+    private func updateColumns(width: CGFloat) {
+        guard width > 0 else { return }
+        let cols = max(1, Int((width - 20) / 180))
+        if viewModel.columnsCount != cols {
+            viewModel.columnsCount = cols
         }
     }
 }
