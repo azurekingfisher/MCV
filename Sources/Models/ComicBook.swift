@@ -1,5 +1,11 @@
 import Foundation
 
+enum ItemType {
+    case upFolder
+    case folder
+    case book
+}
+
 /// 만화책 정보를 담는 모델
 struct ComicBook: Identifiable, Hashable {
     let id: String // 절대 경로와 마지막 수정 시간을 조합한 해시값
@@ -7,10 +13,17 @@ struct ComicBook: Identifiable, Hashable {
     let title: String
     var totalPages: Int
     var isThumbnailLoaded: Bool = false
+    var type: ItemType
     
-    init(url: URL) {
+    init(url: URL, type: ItemType = .book) {
         self.url = url
-        self.title = url.deletingPathExtension().lastPathComponent
+        self.type = type
+        
+        if type == .upFolder {
+            self.title = "상위 폴더로"
+        } else {
+            self.title = url.deletingPathExtension().lastPathComponent
+        }
         
         // 고유 ID(해시) 생성: 경로 + 수정시간
         let path = url.path

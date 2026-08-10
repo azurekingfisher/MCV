@@ -7,7 +7,11 @@ class ViewerViewModel: ObservableObject {
     // 메뉴 커맨드에서 접근할 수 있도록 현재 활성 뷰어를 추적
     static var current: ViewerViewModel?
     @Published var book: ComicBook
-    @Published var currentIndex: Int = 0
+    @Published var currentIndex: Int = 0 {
+        didSet {
+            UserDefaults.standard.set(currentIndex, forKey: "bookmark_\(book.id)")
+        }
+    }
     @Published var currentPages: [ComicPage] = []
     
     // View settings
@@ -83,6 +87,7 @@ class ViewerViewModel: ObservableObject {
         self.book = book
         self.allBooks = allBooks
         self.zipService = zipService
+        self.currentIndex = UserDefaults.standard.integer(forKey: "bookmark_\(book.id)")
         loadEntries()
     }
     
@@ -100,6 +105,11 @@ class ViewerViewModel: ObservableObject {
             // 1. 키코드 기반 처리 (물리적 키 위치: 한글/영문 입력기 종류에 상관없이 100% 동일하게 동작)
             switch event.keyCode {
             case 123: // ← 왼쪽 방향키
+                if event.modifierFlags.contains(.command) {
+                    self.currentIndex = self.isRightToLeft ? self.totalPages - 1 : 0
+                    self.updateCurrentPages()
+                    return nil
+                }
                 if self.isZoomed {
                     self.pan(dx: 100, dy: 0)
                     return nil
@@ -108,6 +118,11 @@ class ViewerViewModel: ObservableObject {
                     return nil
                 }
             case 124: // → 오른쪽 방향키
+                if event.modifierFlags.contains(.command) {
+                    self.currentIndex = self.isRightToLeft ? 0 : self.totalPages - 1
+                    self.updateCurrentPages()
+                    return nil
+                }
                 if self.isZoomed {
                     self.pan(dx: -100, dy: 0)
                     return nil
@@ -156,6 +171,12 @@ class ViewerViewModel: ObservableObject {
                         targetWindow.toggleFullScreen(nil)
                     }
                 }
+                return nil
+            case 43: // , 키 (쉼표) - 이전장/다음장 전환 (확대 상태에서도 동작)
+                self.turnPage(forward: self.isRightToLeft)
+                return nil
+            case 47: // . 키 (마침표) - 이전장/다음장 전환 (확대 상태에서도 동작)
+                self.turnPage(forward: !self.isRightToLeft)
                 return nil
             case 9: // V 키 (영문 V / 한글 ㅍ) - 세로 맞춤
                 self.isFitToWidth = false
@@ -228,6 +249,10 @@ class ViewerViewModel: ObservableObject {
             entries = try zipService.getPageEntries(from: book.url)
             book.totalPages = entries.count
             totalPages = entries.count
+            
+            if currentIndex >= totalPages && totalPages > 0 {
+                currentIndex = totalPages - 1
+            }
             
             if totalPages > 0 {
                 updateCurrentPages()

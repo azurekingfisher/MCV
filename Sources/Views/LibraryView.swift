@@ -40,7 +40,7 @@ struct LibraryView: View {
                                             .id(book.id)
                                             .onTapGesture {
                                                 viewModel.selectedIndex = index
-                                                selectedBookForNavigation = book
+                                                viewModel.openSelectedBookAction?(book)
                                             }
                                     }
                                 }
@@ -91,7 +91,13 @@ struct LibraryView: View {
             .onAppear {
                 viewModel.installKeyMonitor()
                 viewModel.openSelectedBookAction = { book in
-                    selectedBookForNavigation = book
+                    if book.type == .book {
+                        selectedBookForNavigation = book
+                    } else if book.type == .folder {
+                        viewModel.scanFolder(url: book.url)
+                    } else if book.type == .upFolder {
+                        viewModel.scanFolder(url: book.url)
+                    }
                 }
             }
             .onDisappear {
@@ -114,6 +120,15 @@ struct BookItemView: View {
     @ObservedObject var viewModel: LibraryViewModel
     let isSelected: Bool
     
+    @AppStorage var bookmark: Int
+    
+    init(book: ComicBook, viewModel: LibraryViewModel, isSelected: Bool) {
+        self.book = book
+        self.viewModel = viewModel
+        self.isSelected = isSelected
+        self._bookmark = AppStorage(wrappedValue: 0, "bookmark_\(book.id)")
+    }
+    
     var body: some View {
         VStack {
             RoundedRectangle(cornerRadius: 8)
@@ -121,10 +136,20 @@ struct BookItemView: View {
                 .aspectRatio(0.7, contentMode: .fit)
                 .overlay(
                     Group {
-                        if book.isThumbnailLoaded, let image = viewModel.getThumbnail(for: book) {
-                            Image(nsImage: image)
-                                .resizable()
-                                .scaledToFill()
+                        if book.type == .upFolder {
+                            Image(systemName: "arrow.turn.left.up")
+                                .font(.system(size: 60))
+                                .foregroundColor(.gray)
+                        } else if book.isThumbnailLoaded {
+                            if let image = viewModel.getThumbnail(for: book) {
+                                Image(nsImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                            } else {
+                                Image(systemName: book.type == .folder ? "folder.fill" : "doc.text")
+                                    .font(.system(size: 80))
+                                    .foregroundColor(book.type == .folder ? .blue.opacity(0.8) : .gray)
+                            }
                         } else {
                             ProgressView()
                         }
@@ -138,6 +163,27 @@ struct BookItemView: View {
                 .scaleEffect(isSelected ? 1.04 : 1.0)
                 .shadow(color: isSelected ? Color.blue.opacity(0.6) : Color.black.opacity(0.3), radius: isSelected ? 8 : 4, x: 0, y: isSelected ? 4 : 2)
                 .animation(.easeOut(duration: 0.15), value: isSelected)
+                .overlay(alignment: .bottomLeading) {
+                    if book.type == .folder {
+                        Image(systemName: "folder.fill")
+                            .foregroundColor(.white)
+                            .font(.title2)
+                            .padding(6)
+                            .background(Color.blue.opacity(0.8))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .padding([.bottom, .leading], 8)
+                            .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                    }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if book.type == .book && bookmark > 0 {
+                        Image(systemName: "bookmark.fill")
+                            .foregroundColor(.red)
+                            .font(.title)
+                            .padding([.bottom, .trailing], 8)
+                            .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+                    }
+                }
             
             Text(book.title)
                 .font(.callout)
@@ -146,6 +192,16 @@ struct BookItemView: View {
                 .multilineTextAlignment(.center)
                 .foregroundColor(isSelected ? .blue : .primary)
                 .frame(height: 40, alignment: .top)
+        }
+        .contextMenu {
+            if book.type == .book {
+                Button {
+                    let parentFolder = book.url.deletingLastPathComponent()
+                    UserDefaults.standard.set(book.url.lastPathComponent, forKey: "folder_thumb_\(parentFolder.path)")
+                } label: {
+                    Label("상위 폴더 썸네일로 지정", systemImage: "photo.badge.plus")
+                }
+            }
         }
     }
 }

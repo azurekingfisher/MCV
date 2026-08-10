@@ -4,6 +4,7 @@ import Combine
 
 class LibraryViewModel: ObservableObject {
     @Published var books: [ComicBook] = []
+    @Published var rootFolderURL: URL?
     @Published var selectedFolderURL: URL?
     @Published var displayMode: DisplayMode = .thumbnailAndTitle
     @Published var isScanning: Bool = false
@@ -91,6 +92,7 @@ class LibraryViewModel: ObservableObject {
             if let url = try? URL(resolvingBookmarkData: bookmarkData, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &isStale),
                fileManager.fileExists(atPath: url.path) {
                 _ = url.startAccessingSecurityScopedResource()
+                self.rootFolderURL = url
                 self.selectedFolderURL = url
                 scanFolder(url: url)
                 return
@@ -101,6 +103,7 @@ class LibraryViewModel: ObservableObject {
         if let savedPath = UserDefaults.standard.string(forKey: "lastSelectedFolderURL") {
             let url = URL(fileURLWithPath: savedPath)
             if fileManager.fileExists(atPath: url.path) {
+                self.rootFolderURL = url
                 self.selectedFolderURL = url
                 scanFolder(url: url)
             }
@@ -115,6 +118,7 @@ class LibraryViewModel: ObservableObject {
         
         if panel.runModal() == .OK {
             if let url = panel.url {
+                self.rootFolderURL = url
                 self.selectedFolderURL = url
                 
                 // UserDefaults 및 북마크 저장
@@ -135,18 +139,37 @@ class LibraryViewModel: ObservableObject {
             
             let fileManager = FileManager.default
             do {
-                let contents = try fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles)
+                let contents = try fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey], options: .skipsHiddenFiles)
                 
-                let zipFiles = contents.filter { $0.pathExtension.lowercased() == "zip" }
+                var folders: [ComicBook] = []
+                var zipFiles: [ComicBook] = []
                 
-                // macOS Finder 자연어 정렬 (가나다/알파벳/숫자 순서대로 정렬)
-                let sortedZipFiles = zipFiles.sorted { url1, url2 in
-                    url1.lastPathComponent.localizedStandardCompare(url2.lastPathComponent) == .orderedAscending
+                for itemUrl in contents {
+                    let isDir = (try? itemUrl.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                    if isDir {
+                        folders.append(ComicBook(url: itemUrl, type: .folder))
+                    } else if itemUrl.pathExtension.lowercased() == "zip" {
+                        zipFiles.append(ComicBook(url: itemUrl, type: .book))
+                    }
                 }
                 
-                let newBooks = sortedZipFiles.map { ComicBook(url: $0) }
+                // macOS Finder 자연어 정렬 (가나다/알파벳/숫자 순서대로 정렬)
+                folders.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+                zipFiles.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+                
+                var newBooks: [ComicBook] = []
+                
+                // 상위 폴더로 가는 아이콘 (현재 폴더가 최상위 폴더가 아닐 경우)
+                if let root = self.rootFolderURL, url != root {
+                    let upUrl = url.deletingLastPathComponent()
+                    newBooks.append(ComicBook(url: upUrl, type: .upFolder))
+                }
+                
+                newBooks.append(contentsOf: folders)
+                newBooks.append(contentsOf: zipFiles)
                 
                 DispatchQueue.main.async {
+                    self.selectedFolderURL = url
                     self.books = newBooks
                     self.selectedIndex = 0
                     self.isScanning = false
@@ -161,24 +184,48 @@ class LibraryViewModel: ObservableObject {
             }
         }
     }
+    private func getRepresentativeZipURL(forFolder folderURL: URL) -> URL? {
+        // 1. UserDefaults에서 커스텀 썸네일 확인
+        if let customFilename = UserDefaults.standard.string(forKey: "folder_thumb_\(folderURL.path)") {
+            let customURL = folderURL.appendingPathComponent(customFilename)
+            if FileManager.default.fileExists(atPath: customURL.path) {
+                return customURL
+            }
+        }
+        
+        // 2. 기본값: 폴더 내 첫 번째 zip 파일
+        guard let contents = try? FileManager.default.contentsOfDirectory(at: folderURL, includingPropertiesForKeys: nil, options: .skipsHiddenFiles) else { return nil }
+        let zipFiles = contents.filter { $0.pathExtension.lowercased() == "zip" }
+        return zipFiles.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }.first
+    }
     
     private func loadThumbnails() {
         for (index, book) in books.enumerated() {
+            if book.type == .upFolder { continue }
+            
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 guard let self = self else { return }
                 
-                if self.cacheService.getThumbnail(for: book.id) != nil {
+                let targetURL = book.type == .folder ? self.getRepresentativeZipURL(forFolder: book.url) : book.url
+                guard let zipURL = targetURL else {
+                    DispatchQueue.main.async { self.books[index].isThumbnailLoaded = true }
+                    return
+                }
+                
+                let zipId = ComicBook(url: zipURL, type: .book).id
+                
+                if self.cacheService.getThumbnail(for: zipId) != nil {
                     DispatchQueue.main.async {
                         self.books[index].isThumbnailLoaded = true
                     }
                 } else {
                     // Extract first image to generate thumbnail
                     do {
-                        let entries = try self.zipService.getPageEntries(from: book.url)
+                        let entries = try self.zipService.getPageEntries(from: zipURL)
                         if let firstEntry = entries.first {
-                            let imageData = try self.zipService.extractImageData(from: book.url, entryName: firstEntry)
+                            let imageData = try self.zipService.extractImageData(from: zipURL, entryName: firstEntry)
                             if let image = NSImage(data: imageData) {
-                                self.cacheService.saveThumbnail(image: image, for: book.id)
+                                self.cacheService.saveThumbnail(image: image, for: zipId)
                                 DispatchQueue.main.async {
                                     self.books[index].isThumbnailLoaded = true
                                 }
@@ -193,6 +240,10 @@ class LibraryViewModel: ObservableObject {
     }
     
     func getThumbnail(for book: ComicBook) -> NSImage? {
+        if book.type == .folder {
+            guard let zipURL = getRepresentativeZipURL(forFolder: book.url) else { return nil }
+            return cacheService.getThumbnail(for: ComicBook(url: zipURL, type: .book).id)
+        }
         return cacheService.getThumbnail(for: book.id)
     }
 }
