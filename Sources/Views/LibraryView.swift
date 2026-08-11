@@ -72,7 +72,22 @@ struct LibraryView: View {
             }
             .navigationTitle("MCV 책장")
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Picker("정렬 기준", selection: $viewModel.sortOption) {
+                        ForEach(LibraryViewModel.SortOption.allCases) { option in
+                            Text(option.rawValue).tag(option)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(width: 100)
+                    
+                    Button(action: {
+                        viewModel.sortDirection = viewModel.sortDirection == .ascending ? .descending : .ascending
+                    }) {
+                        Image(systemName: viewModel.sortDirection == .ascending ? "arrow.up" : "arrow.down")
+                    }
+                    .help("오름차순/내림차순 전환")
+                    
                     Button(action: {
                         viewModel.selectFolder()
                     }) {

@@ -20,6 +20,32 @@ class LibraryViewModel: ObservableObject {
         case titleOnly
     }
     
+    enum SortOption: String, CaseIterable, Identifiable {
+        case name = "자연어순"
+        case dateAdded = "최신순"
+        var id: String { rawValue }
+    }
+    
+    enum SortDirection: String, CaseIterable, Identifiable {
+        case ascending = "오름차순"
+        case descending = "내림차순"
+        var id: String { rawValue }
+    }
+    
+    @Published var sortOption: SortOption = SortOption(rawValue: UserDefaults.standard.string(forKey: "librarySortOption") ?? "자연어순") ?? .name {
+        didSet {
+            UserDefaults.standard.set(sortOption.rawValue, forKey: "librarySortOption")
+            if let url = selectedFolderURL { scanFolder(url: url) }
+        }
+    }
+    
+    @Published var sortDirection: SortDirection = SortDirection(rawValue: UserDefaults.standard.string(forKey: "librarySortDirection") ?? "오름차순") ?? .ascending {
+        didSet {
+            UserDefaults.standard.set(sortDirection.rawValue, forKey: "librarySortDirection")
+            if let url = selectedFolderURL { scanFolder(url: url) }
+        }
+    }
+    
     private let zipService: ZipArchiveServiceProtocol
     private let cacheService: ThumbnailCacheServiceProtocol
     
@@ -153,9 +179,22 @@ class LibraryViewModel: ObservableObject {
                     }
                 }
                 
-                // macOS Finder 자연어 정렬 (가나다/알파벳/숫자 순서대로 정렬)
-                folders.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
-                zipFiles.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+                let sortClosure: (ComicBook, ComicBook) -> Bool = { [weak self] a, b in
+                    guard let self = self else { return true }
+                    let isAscending = self.sortDirection == .ascending
+                    
+                    if self.sortOption == .name {
+                        let result = a.title.localizedStandardCompare(b.title) == .orderedAscending
+                        return isAscending ? result : !result
+                    } else {
+                        // dateAdded
+                        let result = a.creationDate < b.creationDate
+                        return isAscending ? result : !result
+                    }
+                }
+                
+                folders.sort(by: sortClosure)
+                zipFiles.sort(by: sortClosure)
                 
                 var newBooks: [ComicBook] = []
                 

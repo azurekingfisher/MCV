@@ -14,6 +14,7 @@ struct ComicBook: Identifiable, Hashable {
     var totalPages: Int
     var isThumbnailLoaded: Bool = false
     var type: ItemType
+    let creationDate: Date
     
     init(url: URL, type: ItemType = .book) {
         self.url = url
@@ -30,6 +31,7 @@ struct ComicBook: Identifiable, Hashable {
         let modDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
         self.id = "\(path)_\(modDate.timeIntervalSince1970)".hashString()
         self.totalPages = 0
+        self.creationDate = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
     }
 }
 
