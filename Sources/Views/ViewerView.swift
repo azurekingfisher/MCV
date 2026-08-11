@@ -75,7 +75,6 @@ struct ViewerView: View {
         }
         .toolbar(.hidden)
         .navigationBarBackButtonHidden(true)
-        .ignoresSafeArea()
         .background(WindowAccessor { window in
             window.collectionBehavior = [.fullScreenPrimary, .fullScreenAllowsTiling]
             window.styleMask.insert([.titled, .resizable, .closable, .miniaturizable])
