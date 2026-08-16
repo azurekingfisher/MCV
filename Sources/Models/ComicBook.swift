@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 enum ItemType {
     case upFolder
@@ -36,11 +37,10 @@ struct ComicBook: Identifiable, Hashable {
 }
 
 extension String {
-    /// 앱 재시작 시에도 변하지 않는 고유 해시(Base64URL) 생성 헬퍼
+    /// 앱 재시작 시에도 변하지 않는 고정 길이(64자) SHA256 해시 생성 헬퍼
     func hashString() -> String {
-        return Data(self.utf8).base64EncodedString()
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "=", with: "")
+        let data = Data(self.utf8)
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }

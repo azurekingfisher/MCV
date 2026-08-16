@@ -172,6 +172,7 @@ class LibraryViewModel: ObservableObject {
     }
     
     func scanFolder(url: URL) {
+        let previousFolderURL = self.selectedFolderURL
         isScanning = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
@@ -227,7 +228,17 @@ class LibraryViewModel: ObservableObject {
                 DispatchQueue.main.async {
                     self.selectedFolderURL = url
                     self.books = newBooks
-                    self.selectedIndex = 0
+                    
+                    if let prev = previousFolderURL, prev.deletingLastPathComponent().path == url.path {
+                        if let targetIndex = newBooks.firstIndex(where: { $0.url.path == prev.path }) {
+                            self.selectedIndex = targetIndex
+                        } else {
+                            self.selectedIndex = 0
+                        }
+                    } else {
+                        self.selectedIndex = 0
+                    }
+                    
                     self.isScanning = false
                     // 썸네일 로딩 시작
                     self.loadThumbnails()

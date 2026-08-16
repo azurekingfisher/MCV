@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "=== MCV 1.2.2 .app 번들 생성 시작 ==="
+echo "=== MCV 1.2.3 .app 번들 생성 시작 ==="
 
 # 1. 릴리즈 빌드
 swift build -c release
@@ -67,9 +67,9 @@ cat << 'EOF' > "${CONTENTS_DIR}/Info.plist"
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.2.2</string>
+    <string>1.2.3</string>
     <key>CFBundleVersion</key>
-    <string>1.2.2</string>
+    <string>1.2.3</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
