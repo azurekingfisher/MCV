@@ -36,8 +36,11 @@ struct ComicBook: Identifiable, Hashable {
 }
 
 extension String {
-    /// 간단한 해시값 생성 헬퍼
+    /// 앱 재시작 시에도 변하지 않는 고유 해시(Base64URL) 생성 헬퍼
     func hashString() -> String {
-        return String(format: "%016llx", UInt64(bitPattern: Int64(self.hashValue)))
+        return Data(self.utf8).base64EncodedString()
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "=", with: "")
     }
 }

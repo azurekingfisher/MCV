@@ -95,6 +95,19 @@ class LibraryViewModel: ObservableObject {
                     }
                 }
                 return nil
+            case 53: // Esc 키
+                if self.selectedFolderURL != self.rootFolderURL {
+                    if let current = self.selectedFolderURL, let root = self.rootFolderURL {
+                        if current.path != root.path {
+                            let parentURL = current.deletingLastPathComponent()
+                            DispatchQueue.main.async {
+                                self.scanFolder(url: parentURL)
+                            }
+                        }
+                    }
+                }
+                // esc로 전체화면이 해제되는 macOS 기본 동작을 막기 위해 무조건 이벤트를 삼킴 (nil 반환)
+                return nil
             default:
                 break
             }
@@ -180,17 +193,21 @@ class LibraryViewModel: ObservableObject {
                 }
                 
                 let sortClosure: (ComicBook, ComicBook) -> Bool = { [weak self] a, b in
-                    guard let self = self else { return true }
+                    guard let self = self else { return false }
                     let isAscending = self.sortDirection == .ascending
                     
+                    let compareResult: ComparisonResult
                     if self.sortOption == .name {
-                        let result = a.title.localizedStandardCompare(b.title) == .orderedAscending
-                        return isAscending ? result : !result
+                        compareResult = a.title.localizedStandardCompare(b.title)
                     } else {
-                        // dateAdded
-                        let result = a.creationDate < b.creationDate
-                        return isAscending ? result : !result
+                        compareResult = a.creationDate == b.creationDate ? .orderedSame : (a.creationDate < b.creationDate ? .orderedAscending : .orderedDescending)
                     }
+                    
+                    if compareResult == .orderedSame {
+                        return false
+                    }
+                    
+                    return isAscending ? (compareResult == .orderedAscending) : (compareResult == .orderedDescending)
                 }
                 
                 folders.sort(by: sortClosure)

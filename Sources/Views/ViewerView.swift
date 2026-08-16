@@ -32,10 +32,11 @@ struct ViewerView: View {
                             viewModel.scale = max(0.5, min(4.0, value.magnitude))
                         }
                 )
-                // 좌우 클릭으로 페이지 전환
+                // 좌우 클릭으로 페이지 전환 (읽는 방향 설정 반영)
                 .onTapGesture { location in
                     let isRightSide = location.x > geometry.size.width / 2
-                    viewModel.turnPage(forward: isRightSide)
+                    let forward = viewModel.isRightToLeft ? !isRightSide : isRightSide
+                    viewModel.turnPage(forward: forward)
                 }
             }
             
