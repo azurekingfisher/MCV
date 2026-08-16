@@ -46,6 +46,11 @@ class LibraryViewModel: ObservableObject {
         }
     }
     
+    var selectedBookId: String? {
+        guard selectedIndex >= 0 && selectedIndex < books.count else { return nil }
+        return books[selectedIndex].id
+    }
+    
     private let zipService: ZipArchiveServiceProtocol
     private let cacheService: ThumbnailCacheServiceProtocol
     

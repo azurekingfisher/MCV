@@ -35,11 +35,14 @@ struct LibraryView: View {
                         ScrollViewReader { proxy in
                             ScrollView {
                                 LazyVGrid(columns: gridColumns, spacing: 30) {
-                                    ForEach(Array(viewModel.books.enumerated()), id: \.element.id) { index, book in
-                                        BookItemView(book: book, viewModel: viewModel, isSelected: index == viewModel.selectedIndex)
+                                    ForEach(viewModel.books) { book in
+                                        BookItemView(book: book, viewModel: viewModel, isSelected: viewModel.selectedBookId == book.id)
                                             .id(book.id)
+                                            .contentShape(Rectangle())
                                             .onTapGesture {
-                                                viewModel.selectedIndex = index
+                                                if let idx = viewModel.books.firstIndex(where: { $0.id == book.id }) {
+                                                    viewModel.selectedIndex = idx
+                                                }
                                                 viewModel.openSelectedBookAction?(book)
                                             }
                                     }
