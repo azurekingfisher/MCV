@@ -108,9 +108,38 @@ class LibraryViewModel: ObservableObject {
                 }
                 // esc로 전체화면이 해제되는 macOS 기본 동작을 막기 위해 무조건 이벤트를 삼킴 (nil 반환)
                 return nil
+            case 3: // F 키 (영문 F / 한글 ㄹ) - 전체화면
+                let targetWindow = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isKeyWindow })
+                if let targetWindow = targetWindow {
+                    targetWindow.collectionBehavior = [.fullScreenPrimary, .fullScreenAllowsTiling]
+                    targetWindow.styleMask.insert([.titled, .resizable, .closable, .miniaturizable])
+                    DispatchQueue.main.async {
+                        targetWindow.toggleFullScreen(nil)
+                    }
+                }
+                return nil
             default:
                 break
             }
+            
+            // 2. 문자 기반 보완 처리 (한글 입력기 상태 지원 및 기호 지원)
+            if let chars = event.charactersIgnoringModifiers?.lowercased() {
+                switch chars {
+                case "f", "ㄹ":
+                    let targetWindow = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isKeyWindow })
+                    if let targetWindow = targetWindow {
+                        targetWindow.collectionBehavior = [.fullScreenPrimary, .fullScreenAllowsTiling]
+                        targetWindow.styleMask.insert([.titled, .resizable, .closable, .miniaturizable])
+                        DispatchQueue.main.async {
+                            targetWindow.toggleFullScreen(nil)
+                        }
+                    }
+                    return nil
+                default:
+                    break
+                }
+            }
+            
             return event
         }
     }

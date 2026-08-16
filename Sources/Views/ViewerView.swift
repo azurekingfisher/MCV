@@ -100,7 +100,7 @@ struct ViewerView: View {
                 HStack(spacing: 0) {
                     ForEach(viewModel.currentPages) { page in
                         if let image = page.image, image.size.height > 0 {
-                            LanczosImageView(image: image, sharpenIntensity: viewModel.sharpenLevel.intensity)
+                            LanczosImageView(image: image, sharpenIntensity: viewModel.sharpenLevel.intensity, autoContrast: viewModel.autoContrast)
                                 .aspectRatio(image.size.width / image.size.height, contentMode: .fit)
                         } else {
                             ProgressView()
@@ -184,6 +184,8 @@ struct ViewerView: View {
                         }
                     }
                 }
+                
+                Toggle("대비 개선 모드", isOn: $viewModel.autoContrast)
             } label: {
                 Image(systemName: "gearshape")
                     .font(.title2)
@@ -227,69 +229,154 @@ struct WindowAccessor: NSViewRepresentable {
     }
 }
 
-// MARK: - Lanczos & Anti-Aliased High Quality Image View with GPU Sharpening
+// MARK: - Lanczos & Anti-Aliased High Quality Image View with GPU Processing
 final class LanczosNSImageView: NSView {
     var image: NSImage? {
-        didSet {
-            needsDisplay = true
-        }
+        didSet { if image != oldValue { processImage() } }
     }
     var sharpenIntensity: Float = 0.0 {
-        didSet {
-            needsDisplay = true
-        }
+        didSet { if sharpenIntensity != oldValue { processImage() } }
+    }
+    var autoContrast: Bool = false {
+        didSet { if autoContrast != oldValue { processImage() } }
     }
     
+    private var processedImage: NSImage?
+    private var processingWorkItem: DispatchWorkItem?
     private static let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+    
+    private func processImage() {
+        processingWorkItem?.cancel()
+        
+        guard let sourceImage = image else {
+            self.processedImage = nil
+            self.needsDisplay = true
+            return
+        }
+        
+        // 필터가 필요 없는 경우 원본 바로 사용
+        if sharpenIntensity <= 0 && !autoContrast {
+            self.processedImage = sourceImage
+            self.needsDisplay = true
+            return
+        }
+        
+        let intensity = sharpenIntensity
+        let applyContrast = autoContrast
+        
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let cgImage = sourceImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+            var ciImage = CIImage(cgImage: cgImage)
+            
+            // 1. 대비 개선 필터 (Auto Contrast)
+            if applyContrast {
+                // 고속 검출을 위해 다운샘플링
+                let scale: CGFloat = min(200.0 / ciImage.extent.width, 200.0 / ciImage.extent.height, 1.0)
+                let scaledImage = ciImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                
+                if let minMaxFilter = CIFilter(name: "CIAreaMinMax") {
+                    minMaxFilter.setValue(scaledImage, forKey: kCIInputImageKey)
+                    minMaxFilter.setValue(CIVector(cgRect: scaledImage.extent), forKey: kCIInputExtentKey)
+                    
+                    if let minMaxImage = minMaxFilter.outputImage {
+                        var pixels = [UInt8](repeating: 0, count: 8) // 2x1 픽셀 (RGBA8)
+                        LanczosNSImageView.ciContext.render(minMaxImage, toBitmap: &pixels, rowBytes: 8, bounds: CGRect(x: 0, y: 0, width: 2, height: 1), format: .RGBA8, colorSpace: nil)
+                        
+                        let minR = CGFloat(pixels[0]) / 255.0
+                        let minG = CGFloat(pixels[1]) / 255.0
+                        let minB = CGFloat(pixels[2]) / 255.0
+                        let maxR = CGFloat(pixels[4]) / 255.0
+                        let maxG = CGFloat(pixels[5]) / 255.0
+                        let maxB = CGFloat(pixels[6]) / 255.0
+                        
+                        let minLuma = minR * 0.299 + minG * 0.587 + minB * 0.114
+                        let maxLuma = maxR * 0.299 + maxG * 0.587 + maxB * 0.114
+                        
+                        if maxLuma > minLuma {
+                            let stretchScale = 1.0 / (maxLuma - minLuma)
+                            let offset = -minLuma * stretchScale
+                            
+                            if let colorMatrix = CIFilter(name: "CIColorMatrix") {
+                                colorMatrix.setValue(ciImage, forKey: kCIInputImageKey)
+                                colorMatrix.setValue(CIVector(x: stretchScale, y: 0, z: 0, w: 0), forKey: "inputRVector")
+                                colorMatrix.setValue(CIVector(x: 0, y: stretchScale, z: 0, w: 0), forKey: "inputGVector")
+                                colorMatrix.setValue(CIVector(x: 0, y: 0, z: stretchScale, w: 0), forKey: "inputBVector")
+                                colorMatrix.setValue(CIVector(x: offset, y: offset, z: offset, w: 0), forKey: "inputBiasVector")
+                                
+                                if let output = colorMatrix.outputImage {
+                                    ciImage = output
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // 2. 샤픈 필터
+            if intensity > 0 {
+                if let sharpenFilter = CIFilter(name: "CISharpenLuminance") {
+                    sharpenFilter.setValue(ciImage, forKey: kCIInputImageKey)
+                    sharpenFilter.setValue(intensity, forKey: kCIInputSharpnessKey)
+                    if let output = sharpenFilter.outputImage {
+                        ciImage = output
+                    }
+                }
+            }
+            
+            // 3. 최종 이미지 캐싱
+            if let outputCGImage = LanczosNSImageView.ciContext.createCGImage(ciImage, from: ciImage.extent) {
+                let finalImage = NSImage(cgImage: outputCGImage, size: sourceImage.size)
+                DispatchQueue.main.async {
+                    if let currentItem = self?.processingWorkItem, !currentItem.isCancelled {
+                        self?.processedImage = finalImage
+                        self?.needsDisplay = true
+                    }
+                }
+            }
+        }
+        
+        self.processingWorkItem = workItem
+        DispatchQueue.global(qos: .userInitiated).async(execute: workItem)
+    }
     
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        guard let image = image, let context = NSGraphicsContext.current else { return }
+        // 캐싱된 이미지가 렌더링 중이면 원본 이미지를 우선 표시
+        let displayImage = processedImage ?? image
+        guard let imageToDraw = displayImage, let context = NSGraphicsContext.current else { return }
         
-        // 안티앨리어싱 및 Lanczos (High Quality) 보간법 설정
         context.imageInterpolation = .high
         context.shouldAntialias = true
         
         let targetRect = self.bounds
         guard targetRect.width > 0 && targetRect.height > 0 else { return }
         
-        // 샤픈 필터 적용 (Core Image GPU 가속)
-        if sharpenIntensity > 0,
-           let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-            let ciImage = CIImage(cgImage: cgImage)
-            if let filter = CIFilter(name: "CISharpenLuminance") {
-                filter.setValue(ciImage, forKey: kCIInputImageKey)
-                filter.setValue(sharpenIntensity, forKey: kCIInputSharpnessKey)
-                
-                if let outputImage = filter.outputImage,
-                   let outputCGImage = LanczosNSImageView.ciContext.createCGImage(outputImage, from: ciImage.extent) {
-                    let sharpenedImage = NSImage(cgImage: outputCGImage, size: targetRect.size)
-                    sharpenedImage.draw(in: targetRect)
-                    return
-                }
-            }
-        }
-        
-        // AppKit 표준 드로잉: 좌표계 왜곡 없이 Lanczos 보간법으로 그리기
-        image.draw(in: targetRect)
+        imageToDraw.draw(in: targetRect)
     }
 }
 
 struct LanczosImageView: NSViewRepresentable {
     let image: NSImage
     var sharpenIntensity: Float = 0.0
+    var autoContrast: Bool = false
     
     func makeNSView(context: Context) -> LanczosNSImageView {
         let view = LanczosNSImageView()
         view.image = image
         view.sharpenIntensity = sharpenIntensity
+        view.autoContrast = autoContrast
         return view
     }
     
     func updateNSView(_ nsView: LanczosNSImageView, context: Context) {
-        nsView.image = image
+        if nsView.image != image {
+            nsView.image = image
+        }
         if nsView.sharpenIntensity != sharpenIntensity {
             nsView.sharpenIntensity = sharpenIntensity
+        }
+        if nsView.autoContrast != autoContrast {
+            nsView.autoContrast = autoContrast
         }
     }
 }

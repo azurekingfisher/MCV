@@ -25,6 +25,12 @@ class ViewerViewModel: ObservableObject {
         }
     }
     
+    @Published var autoContrast: Bool = false {
+        didSet {
+            UserDefaults.standard.set(autoContrast, forKey: "autoContrast_\(book.id)")
+        }
+    }
+    
     // Zoom & Pan state
     @Published var scale: CGFloat = 1.0
     @Published var panOffset: CGSize = .zero
@@ -88,6 +94,7 @@ class ViewerViewModel: ObservableObject {
         self.allBooks = allBooks
         self.zipService = zipService
         self.currentIndex = UserDefaults.standard.integer(forKey: "bookmark_\(book.id)")
+        self.autoContrast = UserDefaults.standard.bool(forKey: "autoContrast_\(book.id)")
         loadEntries()
     }
     
@@ -397,6 +404,7 @@ class ViewerViewModel: ObservableObject {
             
             self.book = allBooks[nextIndex]
             self.currentIndex = 0
+            self.autoContrast = UserDefaults.standard.bool(forKey: "autoContrast_\(self.book.id)")
             self.loadEntries()
             
             showVolumeOverlay(message: self.book.title)
