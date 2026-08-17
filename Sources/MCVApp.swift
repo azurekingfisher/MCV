@@ -19,6 +19,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { notification in
             if let window = notification.object as? NSWindow {
+                // 메뉴 창, 팝업, 헬프 검색창 등 보조 윈도우는 스타일을 수정하지 않음
+                guard !(window is NSPanel),
+                      window.level == .normal,
+                      window.styleMask.contains(.titled),
+                      !window.className.contains("Menu"),
+                      !window.className.contains("Pop") else { return }
                 window.collectionBehavior = [.fullScreenPrimary, .fullScreenAllowsTiling]
                 window.styleMask.insert([.titled, .resizable, .closable, .miniaturizable])
             }
@@ -37,6 +43,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct MCVApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @Environment(\.openWindow) private var openWindow
     
     var body: some Scene {
         WindowGroup {
@@ -46,22 +53,28 @@ struct MCVApp: App {
         }
         .windowResizability(.contentMinSize)
         .commands {
-            ViewerCommands()
+            ViewerCommands(openWindow: openWindow)
+        }
+        
+        Window("MCV 도움말", id: "help") {
+            HelpView()
         }
     }
 }
 
 // MARK: - 뷰어 키보드 단축키 및 정보 메뉴 (앱 메뉴 시스템)
 struct ViewerCommands: Commands {
+    var openWindow: OpenWindowAction
+    
     var body: some Commands {
         CommandGroup(replacing: .appInfo) {
             Button("MCV 정보") {
                 var options: [NSApplication.AboutPanelOptionKey: Any] = [
                     .applicationName: "MCV",
-                    .applicationVersion: "1.3",
-                    .version: "1.3",
+                    .applicationVersion: "1.3.5",
+                    .version: "1.3.5",
                     .credits: NSAttributedString(
-                        string: "macOS 만화책 뷰어 v1.3",
+                        string: "macOS 만화책 뷰어 v1.3.5",
                         attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]
                     )
                 ]
@@ -70,6 +83,21 @@ struct ViewerCommands: Commands {
                 }
                 NSApp.orderFrontStandardAboutPanel(options: options)
             }
+        }
+        
+        CommandGroup(replacing: .appVisibility) {
+            Button("창 숨기기/표시하기") {
+                let targetWindow = ViewerViewModel.current?.window ?? NSApp.keyWindow ?? NSApp.windows.first(where: { $0.title != "MCV 도움말" && $0.className != "NSStatusBarWindow" })
+                if let window = targetWindow {
+                    if window.isVisible {
+                        window.orderOut(nil)
+                    } else {
+                        window.makeKeyAndOrderFront(nil)
+                        NSApp.activate(ignoringOtherApps: true)
+                    }
+                }
+            }
+            .keyboardShortcut("h", modifiers: [.command])
         }
         
         CommandMenu("뷰어") {
@@ -100,7 +128,6 @@ struct ViewerCommands: Commands {
             Button("가로 맞춤 보기") {
                 ViewerViewModel.current?.isFitToWidth = true
             }
-            .keyboardShortcut("h", modifiers: [])
             
             Divider()
             
@@ -120,6 +147,12 @@ struct ViewerCommands: Commands {
                 ViewerViewModel.current?.dismissAction?()
             }
             .keyboardShortcut(.escape, modifiers: [])
+        }
+        
+        CommandGroup(replacing: .help) {
+            Button("MCV 도움말 보기") {
+                openWindow(id: "help")
+            }
         }
     }
 }

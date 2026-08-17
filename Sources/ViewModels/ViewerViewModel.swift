@@ -63,8 +63,26 @@ class ViewerViewModel: ObservableObject {
         }
     }
     
-    func pan(dx: CGFloat, dy: CGFloat) {
-        withAnimation(.easeOut(duration: 0.1)) {
+    func toggleSmartZoom() {
+        if self.isZoomed {
+            self.resetZoom()
+        } else {
+            let ratio = UserDefaults.standard.double(forKey: "smartZoomRatio")
+            let targetRatio = ratio > 0 ? ratio : 2.0
+            withAnimation(.easeOut(duration: 0.2)) {
+                self.scale = targetRatio
+                self.panOffset = .zero
+            }
+        }
+    }
+    
+    func pan(dx: CGFloat, dy: CGFloat, animated: Bool = false) {
+        if animated {
+            withAnimation(.easeOut(duration: 0.1)) {
+                panOffset.width += dx
+                panOffset.height += dy
+            }
+        } else {
             panOffset.width += dx
             panOffset.height += dy
         }
@@ -74,8 +92,13 @@ class ViewerViewModel: ObservableObject {
     @Published var volumeOverlayMessage: String?
     @Published var totalPages: Int = 0
     
-    // UI state
     @Published var isControlsVisible: Bool = false
+    
+    // Swipe interaction state
+    @Published var prevPages: [ComicPage] = []
+    @Published var nextPages: [ComicPage] = []
+    @Published var swipeOffset: CGFloat = 0
+    private var hasTurnedPageInCurrentSwipe: Bool = false
     
     private let zipService: ZipArchiveServiceProtocol
     private var entries: [String] = []
@@ -88,6 +111,8 @@ class ViewerViewModel: ObservableObject {
     var scrollToTopAction: (() -> Void)?
     weak var window: NSWindow?
     private var keyMonitor: Any?
+    private var scrollAccumulatorX: CGFloat = 0
+    private var lastScrollTime: Date = Date()
     
     init(book: ComicBook, allBooks: [ComicBook] = [], zipService: ZipArchiveServiceProtocol = ZipArchiveService()) {
         self.book = book
@@ -106,8 +131,95 @@ class ViewerViewModel: ObservableObject {
         removeKeyMonitor()
         self.dismissAction = dismissAction
         
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .scrollWheel, .smartMagnify]) { [weak self] event in
             guard let self = self else { return event }
+            
+            // --- 스마트 줌 (두 손가락 더블 탭) ---
+            if event.type == .smartMagnify {
+                self.toggleSmartZoom()
+                return nil
+            }
+            
+            // --- 트랙패드 / 마우스 스크롤 이벤트 처리 ---
+            if event.type == .scrollWheel {
+                if self.isZoomed {
+                    // 확대 상태: 패닝 (이동 방향은 macOS 자연스러운 스크롤 기준에 따라 기본적으로 맞음)
+                    self.pan(dx: event.scrollingDeltaX * 2, dy: event.scrollingDeltaY * 2)
+                    return nil
+                } else {
+                    // 기본 상태: 페이지 스와이프 (가로 이동 중심)
+                    if abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) {
+                        let now = Date()
+                        // 이벤트 간격이 0.3초 이상이면 새로운 제스처로 간주
+                        if now.timeIntervalSince(self.lastScrollTime) > 0.3 {
+                            self.hasTurnedPageInCurrentSwipe = false
+                            if self.swipeOffset == 0 {
+                                self.scrollAccumulatorX = 0
+                            }
+                        }
+                        self.lastScrollTime = now
+                        
+                        if event.phase == .began || event.phase == .mayBegin {
+                            self.hasTurnedPageInCurrentSwipe = false
+                            self.scrollAccumulatorX = 0
+                            self.swipeOffset = 0
+                        }
+                        
+                        // 이미 페이지를 넘겼다면 추가로 넘기지 않고 무시
+                        if !self.hasTurnedPageInCurrentSwipe {
+                            self.scrollAccumulatorX += event.scrollingDeltaX
+                            
+                            // 뷰어 너비를 기준으로 스와이프 오프셋 계산
+                            if let w = self.window?.contentView?.frame.width, w > 0 {
+                                // 화면 너비의 일부를 제스처로 이동 (속도감 조정)
+                                self.swipeOffset = self.scrollAccumulatorX
+                                
+                                // 임계치 (화면 너비의 15% 또는 최소 100px)
+                                let threshold = max(100, w * 0.15)
+                                
+                                if abs(self.scrollAccumulatorX) > threshold {
+                                    self.hasTurnedPageInCurrentSwipe = true
+                                    let isSwipingLeft = self.scrollAccumulatorX < 0
+                                    let forward = self.isRightToLeft ? !isSwipingLeft : isSwipingLeft
+                                    
+                                    // 애니메이션으로 남은 거리를 끝까지 이동시킨 후 페이지 넘김
+                                    let targetOffset = isSwipingLeft ? -w : w
+                                    
+                                    // 주의: withAnimation 내부에서 swipeOffset을 변경하고,
+                                    // 애니메이션 완료 후(대략 0.2초) 실제 페이지 턴 수행
+                                    DispatchQueue.main.async {
+                                        withAnimation(.easeOut(duration: 0.2)) {
+                                            self.swipeOffset = targetOffset
+                                        }
+                                        
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                            self.turnPage(forward: forward)
+                                            self.swipeOffset = 0
+                                            self.scrollAccumulatorX = 0
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if event.phase == .ended || event.phase == .cancelled {
+                            self.hasTurnedPageInCurrentSwipe = false
+                            // 끝났을 때 임계치를 넘지 못했다면 원래 자리로 튕겨 돌아가기
+                            if self.swipeOffset != 0 {
+                                DispatchQueue.main.async {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                        self.swipeOffset = 0
+                                        self.scrollAccumulatorX = 0
+                                    }
+                                }
+                            }
+                        }
+                        
+                        return nil
+                    }
+                }
+                return event
+            }
             
             // 1. 키코드 기반 처리 (물리적 키 위치: 한글/영문 입력기 종류에 상관없이 100% 동일하게 동작)
             switch event.keyCode {
@@ -118,7 +230,7 @@ class ViewerViewModel: ObservableObject {
                     return nil
                 }
                 if self.isZoomed {
-                    self.pan(dx: 100, dy: 0)
+                    self.pan(dx: 100, dy: 0, animated: true)
                     return nil
                 } else {
                     self.turnPage(forward: self.isRightToLeft)
@@ -131,7 +243,7 @@ class ViewerViewModel: ObservableObject {
                     return nil
                 }
                 if self.isZoomed {
-                    self.pan(dx: -100, dy: 0)
+                    self.pan(dx: -100, dy: 0, animated: true)
                     return nil
                 } else {
                     self.turnPage(forward: !self.isRightToLeft)
@@ -139,7 +251,7 @@ class ViewerViewModel: ObservableObject {
                 }
             case 125: // ↓ 아래 방향키
                 if self.isZoomed {
-                    self.pan(dx: 0, dy: -100)
+                    self.pan(dx: 0, dy: -100, animated: true)
                     return nil
                 } else if self.isFitToWidth {
                     DispatchQueue.main.async {
@@ -149,7 +261,7 @@ class ViewerViewModel: ObservableObject {
                 }
             case 126: // ↑ 위 방향키
                 if self.isZoomed {
-                    self.pan(dx: 0, dy: 100)
+                    self.pan(dx: 0, dy: 100, animated: true)
                     return nil
                 } else if self.isFitToWidth {
                     DispatchQueue.main.async {
@@ -158,50 +270,79 @@ class ViewerViewModel: ObservableObject {
                     return nil
                 }
             case 27: // - 키 (알파벳 상단 키패드 - 축소)
-                self.zoomOut()
-                return nil
+                if !event.modifierFlags.contains(.command) {
+                    self.zoomOut()
+                    return nil
+                }
             case 24: // = / + 키 (알파벳 상단 키패드 - 확대)
-                self.zoomIn()
-                return nil
+                if !event.modifierFlags.contains(.command) {
+                    self.zoomIn()
+                    return nil
+                }
             case 29: // 0 키 (알파벳 상단 키패드 - 배율 초기화)
-                self.resetZoom()
-                return nil
+                if !event.modifierFlags.contains(.command) {
+                    self.resetZoom()
+                    return nil
+                }
             case 53: // Esc 키 (전체화면 상태를 유지하면서 책장으로 돌아가기)
                 self.dismissAction?()
                 return nil
             case 3: // F 키 (영문 F / 한글 ㄹ) - 전체화면
-                let targetWindow = self.window ?? NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isKeyWindow })
-                if let targetWindow = targetWindow {
-                    targetWindow.collectionBehavior = [.fullScreenPrimary, .fullScreenAllowsTiling]
-                    targetWindow.styleMask.insert([.titled, .resizable, .closable, .miniaturizable])
-                    DispatchQueue.main.async {
-                        targetWindow.toggleFullScreen(nil)
+                if !event.modifierFlags.contains(.command) {
+                    let targetWindow = self.window ?? NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isKeyWindow })
+                    if let targetWindow = targetWindow {
+                        targetWindow.collectionBehavior = [.fullScreenPrimary, .fullScreenAllowsTiling]
+                        targetWindow.styleMask.insert([.titled, .resizable, .closable, .miniaturizable])
+                        DispatchQueue.main.async {
+                            targetWindow.toggleFullScreen(nil)
+                        }
                     }
+                    return nil
                 }
-                return nil
             case 43: // , 키 (쉼표) - 이전장/다음장 전환 (확대 상태에서도 동작)
-                self.turnPage(forward: self.isRightToLeft)
-                return nil
+                if !event.modifierFlags.contains(.command) {
+                    self.turnPage(forward: self.isRightToLeft)
+                    return nil
+                }
             case 47: // . 키 (마침표) - 이전장/다음장 전환 (확대 상태에서도 동작)
-                self.turnPage(forward: !self.isRightToLeft)
-                return nil
+                if !event.modifierFlags.contains(.command) {
+                    self.turnPage(forward: !self.isRightToLeft)
+                    return nil
+                }
             case 9: // V 키 (영문 V / 한글 ㅍ) - 세로 맞춤
-                self.isFitToWidth = false
-                return nil
-            case 4: // H 키 (영문 H / 한글 ㅗ) - 가로 맞춤
-                self.isFitToWidth = true
-                return nil
+                if !event.modifierFlags.contains(.command) {
+                    self.isFitToWidth = false
+                    return nil
+                }
+            case 4: // H 키 (영문 H / 한글 ㅗ) - 가로 맞춤 토글
+                if !event.modifierFlags.contains(.command) {
+                    self.isFitToWidth.toggle()
+                    return nil
+                }
             case 33: // [ 키 (영문 [ / 한글 ㅐ) - 이전 파일
-                self.changeBook(forward: false)
-                return nil
+                if !event.modifierFlags.contains(.command) {
+                    self.changeBook(forward: false)
+                    return nil
+                }
             case 30: // ] 키 (영문 ] / 한글 ㅔ) - 다음 파일
-                self.changeBook(forward: true)
-                return nil
+                if !event.modifierFlags.contains(.command) {
+                    self.changeBook(forward: true)
+                    return nil
+                }
+            case 44: // / 키 (슬래시) - 스마트 줌 토글
+                if !event.modifierFlags.contains(.command) {
+                    self.toggleSmartZoom()
+                    return nil
+                }
             default:
                 break
             }
             
             // 2. 문자 기반 보완 처리 (한글 입력기 상태 지원 및 기호 지원)
+            // Cmd 키가 눌려 있으면 시스템 메뉴 단축키로 넘긴다 (Cmd+H 등)
+            if event.modifierFlags.contains(.command) {
+                return event
+            }
             if let chars = event.charactersIgnoringModifiers?.lowercased() {
                 switch chars {
                 case "-", "_":
@@ -227,13 +368,16 @@ class ViewerViewModel: ObservableObject {
                     self.isFitToWidth = false
                     return nil
                 case "h", "ㅗ", "ㅎ":
-                    self.isFitToWidth = true
+                    self.isFitToWidth.toggle()
                     return nil
                 case "[", "ㅐ":
                     self.changeBook(forward: false)
                     return nil
                 case "]", "ㅔ":
                     self.changeBook(forward: true)
+                    return nil
+                case "/", "?":
+                    self.toggleSmartZoom()
                     return nil
                 default:
                     break
@@ -270,7 +414,8 @@ class ViewerViewModel: ObservableObject {
     }
     
     func turnPage(forward: Bool) {
-        let step = isTwoPageMode ? 2 : 1
+        // 현재 보여지고 있는 실제 장수를 기준으로 인덱스 이동
+        let step = currentPages.count > 0 ? currentPages.count : (isTwoPageMode ? 2 : 1)
         
         // 방향 계산 (isRightToLeft가 참이면 forward가 왼쪽으로 가는 것(페이지 증가))
         var nextIndex = currentIndex
@@ -278,7 +423,13 @@ class ViewerViewModel: ObservableObject {
         if forward {
             nextIndex += step
         } else {
-            nextIndex -= step
+            // 뒤로 갈 때는 무조건 앞의 짝수로 이동하되(isTwoPageMode), 정확한 이전 페이지 장수를 모를 수 있으므로 일단 2 감소 후 홀/짝 보정
+            let backStep = isTwoPageMode ? 2 : 1
+            nextIndex -= backStep
+            
+            if isTwoPageMode && nextIndex % 2 != 0 {
+                nextIndex -= 1
+            }
         }
         
         if nextIndex >= totalPages {
@@ -304,24 +455,18 @@ class ViewerViewModel: ObservableObject {
         }
     }
     
-    func updateCurrentPages() {
-        guard currentIndex < totalPages else { return }
+    func getPages(for index: Int) -> [ComicPage] {
+        guard index >= 0 && index < totalPages else { return [] }
         
         var newPages: [ComicPage] = []
-        
-        // 첫 번째 페이지 로드
-        let page1 = getPage(at: currentIndex)
+        let page1 = getPage(at: index)
         newPages.append(page1)
         
         if isTwoPageMode {
-            // 가로형 스프레드 감지 로직
             if let img = page1.image, img.size.width > img.size.height {
-                // 가로가 세로보다 길면 한 장만 꽉 차게 보여줌 (스프레드 예외 처리)
-            } else if currentIndex + 1 < totalPages {
-                // 다음 페이지 로드
-                let page2 = getPage(at: currentIndex + 1)
-                
-                // 두 번째 페이지도 가로형이면 따로 보여줘야 하지만, 단순화를 위해 첫페이지만 체크
+                // 가로형 스프레드 감지 (예외 처리)
+            } else if index + 1 < totalPages {
+                let page2 = getPage(at: index + 1)
                 if let img2 = page2.image, img2.size.width > img2.size.height {
                     // 예외
                 } else {
@@ -330,19 +475,35 @@ class ViewerViewModel: ObservableObject {
             }
         }
         
-        // 표시 순서 결정
         if newPages.count == 2 {
             if (isRightToLeft && !isSpreadInverted) || (!isRightToLeft && isSpreadInverted) {
-                newPages.swapAt(0, 1) // 오른쪽에서 왼쪽으로 읽으면 다음 페이지가 왼쪽에 렌더링되어야 함
+                newPages.swapAt(0, 1)
             }
         }
         
-        self.currentPages = newPages
+        return newPages
+    }
+    
+    func updateCurrentPages() {
+        guard currentIndex < totalPages else { return }
+        
+        // 현재 페이지
+        self.currentPages = getPages(for: currentIndex)
+        
+        // 다음 페이지 (현재 표시된 페이지 수만큼 인덱스 증가)
+        let nextIdx = currentIndex + self.currentPages.count
+        self.nextPages = nextIdx < totalPages ? getPages(for: nextIdx) : []
+        
+        // 이전 페이지 (정확히 몇 페이지 이전인지 알기 어렵지만, isTwoPageMode일 땐 보통 2 감소)
+        // currentIndex는 항상 짝수/홀수 규칙을 따르므로 -step을 사용 (단, 이전 페이지가 스프레드일 수 있음)
+        let prevStep = isTwoPageMode ? 2 : 1
+        let prevIdx = currentIndex - prevStep
+        self.prevPages = prevIdx >= 0 ? getPages(for: prevIdx) : []
         
         // 페이지 변경 시 가로 꽉 참 스크롤을 항상 맨 위로 리셋
         scrollToTop()
         
-        // 메모리 관리를 위해 앞뒤 2페이지만 캐싱하고 나머지는 삭제
+        // 캐시 관리
         manageCache()
     }
     

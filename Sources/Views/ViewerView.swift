@@ -3,6 +3,8 @@ import SwiftUI
 struct ViewerView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: ViewerViewModel
+    @State private var dragStartPanOffset: CGSize = .zero
+    @AppStorage("smartZoomRatio") private var smartZoomRatio: Double = 2.0
     
     init(book: ComicBook, allBooks: [ComicBook] = []) {
         _viewModel = StateObject(wrappedValue: ViewerViewModel(book: book, allBooks: allBooks))
@@ -31,6 +33,22 @@ struct ViewerView: View {
                         .onChanged { value in
                             viewModel.scale = max(0.5, min(4.0, value.magnitude))
                         }
+                        .simultaneously(with: DragGesture(minimumDistance: 5)
+                            .onChanged { value in
+                                if viewModel.isZoomed {
+                                    if dragStartPanOffset == .zero {
+                                        dragStartPanOffset = viewModel.panOffset
+                                    }
+                                    viewModel.panOffset = CGSize(
+                                        width: dragStartPanOffset.width + value.translation.width,
+                                        height: dragStartPanOffset.height + value.translation.height
+                                    )
+                                }
+                            }
+                            .onEnded { _ in
+                                dragStartPanOffset = .zero
+                            }
+                        )
                 )
                 // 좌우 클릭으로 페이지 전환 (읽는 방향 설정 반영)
                 .onTapGesture { location in
@@ -95,24 +113,51 @@ struct ViewerView: View {
     
     @ViewBuilder
     private func viewerContent(geometry: GeometryProxy) -> some View {
+        let w = geometry.size.width
+        
         ZStack {
-            if let combinedRatio = getCombinedAspectRatio(pages: viewModel.currentPages) {
-                HStack(spacing: 0) {
-                    ForEach(viewModel.currentPages) { page in
-                        if let image = page.image, image.size.height > 0 {
-                            LanczosImageView(image: image, sharpenIntensity: viewModel.sharpenLevel.intensity, autoContrast: viewModel.autoContrast)
-                                .aspectRatio(image.size.width / image.size.height, contentMode: .fit)
-                        } else {
-                            ProgressView()
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
+            // 1. 이전 페이지 (isRightToLeft면 오른쪽, 아니면 왼쪽)
+            let prevOffset: CGFloat = viewModel.isRightToLeft ? w : -w
+            pageGroupView(pages: viewModel.prevPages, geometry: geometry)
+                .offset(x: prevOffset + viewModel.swipeOffset)
+                .opacity(viewModel.isZoomed ? 0 : 1)
+            
+            // 2. 현재 페이지 (중앙)
+            pageGroupView(pages: viewModel.currentPages, geometry: geometry)
+                .offset(x: viewModel.swipeOffset)
+            
+            // 3. 다음 페이지 (isRightToLeft면 왼쪽, 아니면 오른쪽)
+            let nextOffset: CGFloat = viewModel.isRightToLeft ? -w : w
+            pageGroupView(pages: viewModel.nextPages, geometry: geometry)
+                .offset(x: nextOffset + viewModel.swipeOffset)
+                .opacity(viewModel.isZoomed ? 0 : 1)
+        }
+    }
+    
+    @ViewBuilder
+    private func pageGroupView(pages: [ComicPage], geometry: GeometryProxy) -> some View {
+        if pages.isEmpty {
+            Color.clear
+        } else if let combinedRatio = getCombinedAspectRatio(pages: pages) {
+            let fitHeight = geometry.size.width / combinedRatio
+            HStack(spacing: 0) {
+                ForEach(pages) { page in
+                    if let image = page.image, image.size.height > 0 {
+                        LanczosImageView(image: image, sharpenIntensity: viewModel.sharpenLevel.intensity, autoContrast: viewModel.autoContrast)
+                            .aspectRatio(image.size.width / image.size.height, contentMode: .fit)
+                    } else {
+                        ProgressView()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
-                .aspectRatio(combinedRatio, contentMode: .fit)
-                .frame(width: viewModel.isFitToWidth ? geometry.size.width : nil)
-            } else {
-                ProgressView()
             }
+            .aspectRatio(combinedRatio, contentMode: .fit)
+            .frame(width: viewModel.isFitToWidth ? geometry.size.width : nil,
+                   height: viewModel.isFitToWidth ? fitHeight : nil)
+            .frame(maxWidth: viewModel.isFitToWidth ? nil : geometry.size.width,
+                   maxHeight: viewModel.isFitToWidth ? nil : geometry.size.height)
+        } else {
+            ProgressView()
         }
     }
     
@@ -186,6 +231,14 @@ struct ViewerView: View {
                 }
                 
                 Toggle("대비 개선 모드", isOn: $viewModel.autoContrast)
+                
+                Menu("스마트 줌 확대 비율") {
+                    Picker("", selection: $smartZoomRatio) {
+                        Text("150%").tag(1.5)
+                        Text("200%").tag(2.0)
+                        Text("300%").tag(3.0)
+                    }
+                }
             } label: {
                 Image(systemName: "gearshape")
                     .font(.title2)
@@ -381,6 +434,29 @@ struct LanczosImageView: NSViewRepresentable {
     }
 }
 
+// MARK: - Custom Medium Gray Overlay Scroller (흑백 만화 배경에서 최적의 가독성을 제공하는 중간 회색 스크롤바)
+final class MediumGrayScroller: NSScroller {
+    override class var isCompatibleWithOverlayScrollers: Bool {
+        return true
+    }
+    
+    override func drawKnob() {
+        let knobRect = rect(for: .knob)
+        guard !knobRect.isEmpty else { return }
+        
+        let path = NSBezierPath(roundedRect: knobRect.insetBy(dx: 2, dy: 1), xRadius: 3.5, yRadius: 3.5)
+        
+        // 1. 중간 명도의 회색 채우기 (흰색 컷과 검은색 컷 모두에서 뚜렷하게 식별됨)
+        NSColor(white: 0.52, alpha: 0.88).setFill()
+        path.fill()
+        
+        // 2. 미세한 대비 테두리 (경계선 식별 보조)
+        NSColor(white: 0.2, alpha: 0.35).setStroke()
+        path.lineWidth = 0.5
+        path.stroke()
+    }
+}
+
 // MARK: - Fit to Width ScrollView with Keyboard Arrow Support
 struct FitToWidthScrollView<Content: View>: NSViewRepresentable {
     @ObservedObject var viewModel: ViewerViewModel
@@ -393,6 +469,9 @@ struct FitToWidthScrollView<Content: View>: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
+        let customScroller = MediumGrayScroller()
+        scrollView.verticalScroller = customScroller
+        scrollView.scrollerStyle = .overlay
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
@@ -416,6 +495,7 @@ struct FitToWidthScrollView<Content: View>: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
+        nsView.scrollerStyle = .overlay
         if let hostingView = nsView.documentView as? NSHostingView<Content> {
             hostingView.rootView = content
         }
@@ -443,6 +523,7 @@ struct FitToWidthScrollView<Content: View>: NSViewRepresentable {
                     context.timingFunction = CAMediaTimingFunction(name: .easeOut)
                     contentView.animator().setBoundsOrigin(currentPoint)
                     scrollView.reflectScrolledClipView(contentView)
+                    scrollView.flashScrollers()
                 }
             }
 
