@@ -3,6 +3,8 @@ import AppKit
 import Combine
 
 class LibraryViewModel: ObservableObject {
+    static var current: LibraryViewModel?
+    
     @Published var books: [ComicBook] = []
     @Published var rootFolderURL: URL?
     @Published var selectedFolderURL: URL?
@@ -69,12 +71,25 @@ class LibraryViewModel: ObservableObject {
         removeKeyMonitor()
         
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self = self, !self.books.isEmpty else { return event }
+            guard let self = self else { return event }
             
             // 뷰어 모드가 활성화되어 있으면 책장 키 모니터는 작동하지 않고 통과시킴
             if ViewerViewModel.current != nil {
                 return event
             }
+            
+            // Cmd + O: 폴더 열기 (책 목록이 비어있어도 책장 모드라면 즉시 동작)
+            if event.modifierFlags.contains(.command) {
+                if event.keyCode == 31 || event.charactersIgnoringModifiers?.lowercased() == "o" || event.charactersIgnoringModifiers?.lowercased() == "ㅐ" {
+                    DispatchQueue.main.async {
+                        self.selectFolder()
+                    }
+                    return nil
+                }
+                return event
+            }
+            
+            guard !self.books.isEmpty else { return event }
             
             let count = self.books.count
             let columns = max(1, self.columnsCount)

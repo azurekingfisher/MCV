@@ -370,12 +370,6 @@ class ViewerViewModel: ObservableObject {
                 case "h", "ㅗ", "ㅎ":
                     self.isFitToWidth.toggle()
                     return nil
-                case "[", "ㅐ":
-                    self.changeBook(forward: false)
-                    return nil
-                case "]", "ㅔ":
-                    self.changeBook(forward: true)
-                    return nil
                 case "/", "?":
                     self.toggleSmartZoom()
                     return nil

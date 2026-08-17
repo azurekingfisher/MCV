@@ -107,6 +107,7 @@ struct LibraryView: View {
                 }
             }
             .onAppear {
+                LibraryViewModel.current = viewModel
                 viewModel.installKeyMonitor()
                 viewModel.openSelectedBookAction = { book in
                     if book.type == .book {
@@ -119,6 +120,7 @@ struct LibraryView: View {
                 }
             }
             .onDisappear {
+                LibraryViewModel.current = nil
                 viewModel.removeKeyMonitor()
             }
         }

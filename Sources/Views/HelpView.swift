@@ -15,10 +15,10 @@ struct HelpView: View {
                         Text("• 방향키 (↑, ↓): 확대/가로맞춤 시 상하 스크롤")
                         Text("• Space / Shift+Space: 화면 단위로 아래/위로 스크롤 (끝에서 페이지 넘김)")
                         Text("• 마우스 클릭: 화면 좌/우 클릭으로 이전/다음 페이지 넘기기")
-                        Text("• F (한글 ㄹ): 전체화면 전환")
-                        Text("• V (한글 ㅍ): 세로 맞춤 보기")
-                        Text("• H (한글 ㅗ): 가로 맞춤 보기")
-                        Text("• [ / ] (한글 ㅐ/ㅔ): 이전 권 / 다음 권으로 이동")
+                        Text("• F: 전체화면 전환")
+                        Text("• V: 세로 맞춤 보기")
+                        Text("• H: 가로 맞춤 보기")
+                        Text("• [ / ]: 이전 권 / 다음 권으로 이동")
                         Text("• / (슬래시): 스마트 줌 (설정된 배율로 토글)")
                         Text("• -, =, 0: 축소, 확대, 100% 원래 크기")
                     }
@@ -49,7 +49,8 @@ struct HelpView: View {
                 }
             }
             .padding(30)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(width: 500, height: 550)
+        .frame(minWidth: 450, minHeight: 450)
     }
 }

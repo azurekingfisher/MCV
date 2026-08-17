@@ -59,6 +59,10 @@ struct MCVApp: App {
         Window("MCV 도움말", id: "help") {
             HelpView()
         }
+        
+        Window("개선 사항", id: "releaseNotes") {
+            ReleaseNotesView()
+        }
     }
 }
 
@@ -71,10 +75,10 @@ struct ViewerCommands: Commands {
             Button("MCV 정보") {
                 var options: [NSApplication.AboutPanelOptionKey: Any] = [
                     .applicationName: "MCV",
-                    .applicationVersion: "1.3.5",
-                    .version: "1.3.5",
+                    .applicationVersion: "1.4",
+                    .version: "1.4",
                     .credits: NSAttributedString(
-                        string: "macOS 만화책 뷰어 v1.3.5",
+                        string: "macOS 만화책 뷰어 v1.4",
                         attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]
                     )
                 ]
@@ -83,6 +87,16 @@ struct ViewerCommands: Commands {
                 }
                 NSApp.orderFrontStandardAboutPanel(options: options)
             }
+        }
+        
+        CommandGroup(replacing: .newItem) {
+            Button("폴더 열기...") {
+                if ViewerViewModel.current == nil {
+                    LibraryViewModel.current?.selectFolder()
+                }
+            }
+            .keyboardShortcut("o", modifiers: [.command])
+            .disabled(ViewerViewModel.current != nil)
         }
         
         CommandGroup(replacing: .appVisibility) {
@@ -152,6 +166,9 @@ struct ViewerCommands: Commands {
         CommandGroup(replacing: .help) {
             Button("MCV 도움말 보기") {
                 openWindow(id: "help")
+            }
+            Button("개선 사항") {
+                openWindow(id: "releaseNotes")
             }
         }
     }
