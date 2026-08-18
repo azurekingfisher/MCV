@@ -31,17 +31,82 @@ class ViewerViewModel: ObservableObject {
         }
     }
     
+    @Published var prevPageZoomPosition: ZoomPrevPagePosition = ZoomPrevPagePosition(rawValue: UserDefaults.standard.string(forKey: "prevPageZoomPosition") ?? "bottom") ?? .bottom {
+        didSet {
+            UserDefaults.standard.set(prevPageZoomPosition.rawValue, forKey: "prevPageZoomPosition")
+        }
+    }
+    
     // Zoom & Pan state
     @Published var scale: CGFloat = 1.0
     @Published var panOffset: CGSize = .zero
+    @Published var viewportSize: CGSize = .zero
     
     var isZoomed: Bool {
         abs(scale - 1.0) > 0.05
     }
     
+    func getCombinedAspectRatio() -> CGFloat? {
+        guard !currentPages.isEmpty else { return nil }
+        var totalRatio: CGFloat = 0
+        for page in currentPages {
+            if let image = page.image, image.size.height > 0 {
+                totalRatio += image.size.width / image.size.height
+            }
+        }
+        return totalRatio > 0 ? totalRatio : nil
+    }
+    
+    func maxPanOffset(for scaleValue: CGFloat? = nil) -> CGSize {
+        let currentScale = scaleValue ?? self.scale
+        let vSize = (viewportSize.width > 0 && viewportSize.height > 0) ? viewportSize : (window?.contentView?.frame.size ?? .zero)
+        
+        guard currentScale > 1.0, vSize.width > 0, vSize.height > 0 else {
+            return .zero
+        }
+        
+        guard let ratio = getCombinedAspectRatio(), ratio > 0 else {
+            return .zero
+        }
+        
+        let viewportW = vSize.width
+        let viewportH = vSize.height
+        let viewportRatio = viewportW / viewportH
+        
+        let baseW: CGFloat
+        let baseH: CGFloat
+        
+        if ratio > viewportRatio {
+            // 이미지의 가로 비율이 뷰포트보다 더 넓은 경우 (가로에 맞춰짐)
+            baseW = viewportW
+            baseH = viewportW / ratio
+        } else {
+            // 이미지의 세로 비율이 뷰포트보다 더 긴 경우 (세로에 맞춰짐)
+            baseH = viewportH
+            baseW = viewportH * ratio
+        }
+        
+        let renderedW = baseW * currentScale
+        let renderedH = baseH * currentScale
+        
+        let maxX = max(0, (renderedW - viewportW) / 2)
+        let maxY = max(0, (renderedH - viewportH) / 2)
+        
+        return CGSize(width: maxX, height: maxY)
+    }
+    
+    func clampPanOffset(_ offset: CGSize, for scaleValue: CGFloat? = nil) -> CGSize {
+        let maxOffset = maxPanOffset(for: scaleValue)
+        let clampedX = maxOffset.width > 0 ? min(maxOffset.width, max(-maxOffset.width, offset.width)) : 0
+        let clampedY = maxOffset.height > 0 ? min(maxOffset.height, max(-maxOffset.height, offset.height)) : 0
+        return CGSize(width: clampedX, height: clampedY)
+    }
+    
     func zoomIn() {
         withAnimation(.easeOut(duration: 0.15)) {
-            scale = min(4.0, scale + 0.25)
+            let newScale = min(4.0, scale + 0.25)
+            scale = newScale
+            panOffset = clampPanOffset(panOffset, for: newScale)
         }
     }
     
@@ -52,6 +117,7 @@ class ViewerViewModel: ObservableObject {
                 resetZoom()
             } else {
                 scale = newScale
+                panOffset = clampPanOffset(panOffset, for: newScale)
             }
         }
     }
@@ -77,14 +143,15 @@ class ViewerViewModel: ObservableObject {
     }
     
     func pan(dx: CGFloat, dy: CGFloat, animated: Bool = false) {
+        let newOffset = CGSize(width: panOffset.width + dx, height: panOffset.height + dy)
+        let clamped = clampPanOffset(newOffset)
+        
         if animated {
             withAnimation(.easeOut(duration: 0.1)) {
-                panOffset.width += dx
-                panOffset.height += dy
+                panOffset = clamped
             }
         } else {
-            panOffset.width += dx
-            panOffset.height += dy
+            panOffset = clamped
         }
     }
     
@@ -109,6 +176,7 @@ class ViewerViewModel: ObservableObject {
     var dismissAction: (() -> Void)?
     var scrollAction: ((CGFloat) -> Void)?
     var scrollToTopAction: (() -> Void)?
+    var scrollToBottomAction: (() -> Void)?
     weak var window: NSWindow?
     private var keyMonitor: Any?
     private var scrollAccumulatorX: CGFloat = 0
@@ -314,9 +382,9 @@ class ViewerViewModel: ObservableObject {
                     self.isFitToWidth = false
                     return nil
                 }
-            case 4: // H 키 (영문 H / 한글 ㅗ) - 가로 맞춤 토글
+            case 4: // H 키 (영문 H / 한글 ㅗ) - 가로 맞춤
                 if !event.modifierFlags.contains(.command) {
-                    self.isFitToWidth.toggle()
+                    self.isFitToWidth = true
                     return nil
                 }
             case 33: // [ 키 (영문 [ / 한글 ㅐ) - 이전 파일
@@ -368,7 +436,7 @@ class ViewerViewModel: ObservableObject {
                     self.isFitToWidth = false
                     return nil
                 case "h", "ㅗ", "ㅎ":
-                    self.isFitToWidth.toggle()
+                    self.isFitToWidth = true
                     return nil
                 case "/", "?":
                     self.toggleSmartZoom()
@@ -438,6 +506,42 @@ class ViewerViewModel: ObservableObject {
         
         currentIndex = nextIndex
         updateCurrentPages()
+        adjustPanOffsetForPageTurn(forward: forward)
+        adjustFitToWidthForPageTurn(forward: forward)
+    }
+    
+    func adjustPanOffsetForPageTurn(forward: Bool) {
+        guard isZoomed else {
+            panOffset = .zero
+            return
+        }
+        
+        let maxOffset = maxPanOffset()
+        let targetY: CGFloat
+        if forward {
+            // 다음 페이지로 이동할 경우: 최상단
+            targetY = maxOffset.height
+        } else {
+            // 이전 페이지로 이동할 경우: 설정에 따라 최하단 또는 최상단
+            targetY = (prevPageZoomPosition == .bottom) ? -maxOffset.height : maxOffset.height
+        }
+        
+        panOffset = CGSize(width: 0, height: targetY)
+    }
+    
+    func adjustFitToWidthForPageTurn(forward: Bool) {
+        guard isFitToWidth else { return }
+        if forward {
+            // 다음 페이지: 최상단 스크롤
+            scrollToTop()
+        } else {
+            // 이전 페이지: 설정에 따라 최하단 또는 최상단 스크롤
+            if prevPageZoomPosition == .bottom {
+                scrollToBottom()
+            } else {
+                scrollToTop()
+            }
+        }
     }
     
     private func showVolumeOverlay(message: String) {
@@ -494,9 +598,6 @@ class ViewerViewModel: ObservableObject {
         let prevIdx = currentIndex - prevStep
         self.prevPages = prevIdx >= 0 ? getPages(for: prevIdx) : []
         
-        // 페이지 변경 시 가로 꽉 참 스크롤을 항상 맨 위로 리셋
-        scrollToTop()
-        
         // 캐시 관리
         manageCache()
     }
@@ -504,6 +605,12 @@ class ViewerViewModel: ObservableObject {
     func scrollToTop() {
         DispatchQueue.main.async {
             self.scrollToTopAction?()
+        }
+    }
+    
+    func scrollToBottom() {
+        DispatchQueue.main.async {
+            self.scrollToBottomAction?()
         }
     }
     
@@ -584,6 +691,21 @@ enum SharpenLevel: String, CaseIterable, Identifiable {
         case .low: return 0.4
         case .medium: return 0.8
         case .high: return 1.4
+        }
+    }
+}
+
+// MARK: - 확대 시 이전 페이지 위치 Enum
+enum ZoomPrevPagePosition: String, CaseIterable, Identifiable {
+    case bottom = "bottom"
+    case top = "top"
+    
+    var id: String { rawValue }
+    
+    var title: String {
+        switch self {
+        case .bottom: return "최하단"
+        case .top: return "최상단"
         }
     }
 }

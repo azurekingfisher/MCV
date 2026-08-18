@@ -135,18 +135,53 @@ struct LibraryView: View {
     }
 }
 
+// MARK: - 썸네일 표지 영역 크롭/표시 모드
+enum ThumbnailCropMode: String, CaseIterable, Identifiable {
+    case center = "center"
+    case left = "left"
+    case right = "right"
+    case fit = "fit"
+    
+    var id: String { rawValue }
+    
+    var title: String {
+        switch self {
+        case .center: return "현재 방식 (기본)"
+        case .left: return "책의 왼쪽만 보여주기"
+        case .right: return "책의 오른쪽만 보여주기"
+        case .fit: return "가로로 꽉 차게 보여주기"
+        }
+    }
+    
+    var next: ThumbnailCropMode {
+        switch self {
+        case .center: return .left
+        case .left: return .right
+        case .right: return .fit
+        case .fit: return .center
+        }
+    }
+}
+
 struct BookItemView: View {
     let book: ComicBook
     @ObservedObject var viewModel: LibraryViewModel
     let isSelected: Bool
     
     @AppStorage var bookmark: Int
+    @AppStorage var cropModeRaw: String
+    
+    private var cropMode: ThumbnailCropMode {
+        get { ThumbnailCropMode(rawValue: cropModeRaw) ?? .center }
+        nonmutating set { cropModeRaw = newValue.rawValue }
+    }
     
     init(book: ComicBook, viewModel: LibraryViewModel, isSelected: Bool) {
         self.book = book
         self.viewModel = viewModel
         self.isSelected = isSelected
         self._bookmark = AppStorage(wrappedValue: 0, "bookmark_\(book.id)")
+        self._cropModeRaw = AppStorage(wrappedValue: ThumbnailCropMode.center.rawValue, "thumb_crop_\(book.id)")
     }
     
     var body: some View {
@@ -162,9 +197,7 @@ struct BookItemView: View {
                                 .foregroundColor(.gray)
                         } else if book.isThumbnailLoaded {
                             if let image = viewModel.getThumbnail(for: book) {
-                                Image(nsImage: image)
-                                    .resizable()
-                                    .scaledToFill()
+                                thumbnailImageView(image: image)
                             } else {
                                 Image(systemName: book.type == .folder ? "folder.fill" : "doc.text")
                                     .font(.system(size: 80))
@@ -214,6 +247,31 @@ struct BookItemView: View {
                 .frame(height: 40, alignment: .top)
         }
         .contextMenu {
+            if book.type == .book || book.type == .folder {
+                Button {
+                    cropMode = cropMode.next
+                } label: {
+                    Label("표지 영역: \(cropMode.title)", systemImage: "rectangle.split.2x1")
+                }
+                
+                Menu("표지 영역 선택") {
+                    ForEach(ThumbnailCropMode.allCases) { mode in
+                        Button {
+                            cropMode = mode
+                        } label: {
+                            HStack {
+                                Text(mode.title)
+                                if cropMode == mode {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Divider()
+            }
+            
             if book.type == .book {
                 Button {
                     let parentFolder = book.url.deletingLastPathComponent()
@@ -221,6 +279,34 @@ struct BookItemView: View {
                 } label: {
                     Label("상위 폴더 썸네일로 지정", systemImage: "photo.badge.plus")
                 }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func thumbnailImageView(image: NSImage) -> some View {
+        GeometryReader { geo in
+            switch cropMode {
+            case .center:
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: geo.size.width, height: geo.size.height, alignment: .center)
+            case .left:
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
+            case .right:
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: geo.size.width, height: geo.size.height, alignment: .trailing)
+            case .fit:
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: geo.size.width, height: geo.size.height, alignment: .center)
             }
         }
     }

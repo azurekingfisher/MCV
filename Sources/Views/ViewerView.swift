@@ -4,6 +4,7 @@ struct ViewerView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: ViewerViewModel
     @State private var dragStartPanOffset: CGSize = .zero
+    @State private var isDragging: Bool = false
     @AppStorage("smartZoomRatio") private var smartZoomRatio: Double = 2.0
     
     init(book: ComicBook, allBooks: [ComicBook] = []) {
@@ -26,26 +27,38 @@ struct ViewerView: View {
                     }
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
-                .offset(viewModel.panOffset)
                 .scaleEffect(viewModel.scale)
+                .offset(viewModel.panOffset)
+                .onAppear {
+                    viewModel.viewportSize = geometry.size
+                }
+                .onChange(of: geometry.size) { newSize in
+                    viewModel.viewportSize = newSize
+                    viewModel.panOffset = viewModel.clampPanOffset(viewModel.panOffset)
+                }
                 .gesture(
                     MagnificationGesture()
                         .onChanged { value in
-                            viewModel.scale = max(0.5, min(4.0, value.magnitude))
+                            let newScale = max(0.5, min(4.0, value.magnitude))
+                            viewModel.scale = newScale
+                            viewModel.panOffset = viewModel.clampPanOffset(viewModel.panOffset, for: newScale)
                         }
                         .simultaneously(with: DragGesture(minimumDistance: 5)
                             .onChanged { value in
                                 if viewModel.isZoomed {
-                                    if dragStartPanOffset == .zero {
+                                    if !isDragging {
+                                        isDragging = true
                                         dragStartPanOffset = viewModel.panOffset
                                     }
-                                    viewModel.panOffset = CGSize(
+                                    let rawOffset = CGSize(
                                         width: dragStartPanOffset.width + value.translation.width,
                                         height: dragStartPanOffset.height + value.translation.height
                                     )
+                                    viewModel.panOffset = viewModel.clampPanOffset(rawOffset)
                                 }
                             }
                             .onEnded { _ in
+                                isDragging = false
                                 dragStartPanOffset = .zero
                             }
                         )
@@ -233,10 +246,32 @@ struct ViewerView: View {
                 Toggle("대비 개선 모드", isOn: $viewModel.autoContrast)
                 
                 Menu("스마트 줌 확대 비율") {
-                    Picker("", selection: $smartZoomRatio) {
-                        Text("150%").tag(1.5)
-                        Text("200%").tag(2.0)
-                        Text("300%").tag(3.0)
+                    ForEach([1.5, 2.0, 3.0], id: \.self) { ratio in
+                        Button(action: {
+                            smartZoomRatio = ratio
+                        }) {
+                            HStack {
+                                Text("\(Int(ratio * 100))%")
+                                if smartZoomRatio == ratio {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Menu("이전 페이지 이동 시 위치") {
+                    ForEach(ZoomPrevPagePosition.allCases) { pos in
+                        Button(action: {
+                            viewModel.prevPageZoomPosition = pos
+                        }) {
+                            HStack {
+                                Text(pos.title)
+                                if viewModel.prevPageZoomPosition == pos {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
                     }
                 }
             } label: {
@@ -529,9 +564,23 @@ struct FitToWidthScrollView<Content: View>: NSViewRepresentable {
 
             viewModel.scrollToTopAction = { [weak scrollView] in
                 guard let scrollView = scrollView else { return }
-                let contentView = scrollView.contentView
-                contentView.scroll(to: NSPoint(x: 0, y: 0))
-                scrollView.reflectScrolledClipView(contentView)
+                DispatchQueue.main.async {
+                    let contentView = scrollView.contentView
+                    contentView.scroll(to: NSPoint(x: 0, y: 0))
+                    scrollView.reflectScrolledClipView(contentView)
+                }
+            }
+            
+            viewModel.scrollToBottomAction = { [weak scrollView] in
+                guard let scrollView = scrollView else { return }
+                DispatchQueue.main.async {
+                    if let documentView = scrollView.documentView {
+                        documentView.layoutSubtreeIfNeeded()
+                        let maxY = max(0, documentView.bounds.height - scrollView.contentView.bounds.height)
+                        scrollView.contentView.scroll(to: NSPoint(x: 0, y: maxY))
+                        scrollView.reflectScrolledClipView(scrollView.contentView)
+                    }
+                }
             }
         }
     }
