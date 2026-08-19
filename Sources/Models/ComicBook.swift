@@ -32,7 +32,55 @@ struct ComicBook: Identifiable, Hashable {
         let modDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
         self.id = "\(path)_\(modDate.timeIntervalSince1970)".hashString()
         self.totalPages = 0
-        self.creationDate = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
+        if type == .folder {
+            self.creationDate = ComicBook.getLatestDate(for: url)
+        } else {
+            let values = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
+            let cDate = values?.creationDate ?? Date.distantPast
+            let mDate = values?.contentModificationDate ?? Date.distantPast
+            let maxDate = max(cDate, mDate)
+            self.creationDate = (maxDate != Date.distantPast) ? maxDate : Date()
+        }
+    }
+    
+    /// 폴더 내의 가장 최신 파일 생성/수정 날짜를 검색 (없으면 폴더 자체 날짜 반환)
+    static func getLatestDate(for folderURL: URL) -> Date {
+        let fileManager = FileManager.default
+        let folderValues = try? folderURL.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
+        var latestDate = max(
+            folderValues?.creationDate ?? Date.distantPast,
+            folderValues?.contentModificationDate ?? Date.distantPast
+        )
+        if latestDate == Date.distantPast {
+            latestDate = Date()
+        }
+        
+        guard let enumerator = fileManager.enumerator(
+            at: folderURL,
+            includingPropertiesForKeys: [.creationDateKey, .contentModificationDateKey, .isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return latestDate
+        }
+        
+        var count = 0
+        let maxFilesToCheck = 1000
+        
+        for case let fileURL as URL in enumerator {
+            count += 1
+            if count > maxFilesToCheck { break }
+            
+            if let values = try? fileURL.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey]) {
+                if let cDate = values.creationDate, cDate > latestDate {
+                    latestDate = cDate
+                }
+                if let mDate = values.contentModificationDate, mDate > latestDate {
+                    latestDate = mDate
+                }
+            }
+        }
+        
+        return latestDate
     }
 }
 

@@ -8,6 +8,17 @@ struct ReleaseNotesView: View {
                     .font(.largeTitle)
                     .bold()
                 
+                // v1.5.1
+                versionSection(
+                    version: "v1.5.1",
+                    date: "2026.08.20",
+                    items: [
+                        "책장 모드 최신순 정렬 시, 폴더 자체 생성 날짜 대신 '폴더 내 가장 최신 파일의 생성/수정 날짜'를 기준으로 정렬하도록 개선"
+                    ]
+                )
+                
+                Divider()
+                
                 // v1.5.0
                 versionSection(
                     version: "v1.5.0",
