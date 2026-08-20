@@ -8,6 +8,18 @@ struct ReleaseNotesView: View {
                     .font(.largeTitle)
                     .bold()
                 
+                // v1.5.2
+                versionSection(
+                    version: "v1.5.2",
+                    date: "2026.08.21",
+                    items: [
+                        "뷰어 모드 하단바 및 오버레이에 macOS 리퀴드 글래스(Liquid Glass) 디자인 스타일 적용 (울트라 씬 블러, 빛 굴절 테두리, 입체 섀도우, 접근성 투명도 폴백)",
+                        "확대 상태에서 페이지의 가로 폭이 창 폭 이내인 경우 좌우 방향키(←, →)로 자연스러운 페이지 이동(넘김) 지원"
+                    ]
+                )
+                
+                Divider()
+                
                 // v1.5.1
                 versionSection(
                     version: "v1.5.1",

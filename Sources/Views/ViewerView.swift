@@ -75,10 +75,11 @@ struct ViewerView: View {
             if let overlayMessage = viewModel.volumeOverlayMessage {
                 Text(overlayMessage)
                     .font(.title2)
-                    .padding(30)
-                    .background(Color.black.opacity(0.7))
                     .foregroundColor(.white)
-                    .cornerRadius(15)
+                    .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 18)
+                    .liquidGlass(cornerRadius: 18)
                     .transition(.opacity)
                     .zIndex(10)
             }
@@ -193,6 +194,7 @@ struct ViewerView: View {
                 Image(systemName: "chevron.left")
                     .font(.title2)
                     .foregroundColor(.white)
+                    .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
                     .padding()
             }
             .buttonStyle(.plain)
@@ -213,7 +215,9 @@ struct ViewerView: View {
             
             Text("\(viewModel.currentIndex + 1) / \(viewModel.totalPages)")
                 .foregroundColor(.white)
+                .font(.system(.body, design: .rounded).weight(.semibold))
                 .monospacedDigit()
+                .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
             
             Spacer()
             
@@ -278,16 +282,62 @@ struct ViewerView: View {
                 Image(systemName: "gearshape")
                     .font(.title2)
                     .foregroundColor(.white)
+                    .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
                     .padding()
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(Color.black.opacity(0.8))
-        .cornerRadius(20)
+        .padding(.vertical, 8)
+        .liquidGlass(cornerRadius: 22)
         .padding(.horizontal, 40)
+    }
+}
+
+// MARK: - Liquid Glass Style Modifier
+struct LiquidGlassModifier: ViewModifier {
+    var cornerRadius: CGFloat = 20
+    @Environment(\.accessibilityReduceTransparency) var reduceTransparency
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                if reduceTransparency {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(Color(NSColor.windowBackgroundColor).opacity(0.95))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                                .strokeBorder(Color.black.opacity(0.15), lineWidth: 1)
+                        )
+                        .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 3)
+                } else {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        // macOS Liquid Glass Material
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                                .strokeBorder(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.white.opacity(0.4),
+                                            Color.white.opacity(0.1)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1
+                                )
+                        )
+                        .shadow(color: .black.opacity(0.2), radius: 12, x: 0, y: 6)
+                }
+            }
+    }
+}
+
+extension View {
+    func liquidGlass(cornerRadius: CGFloat = 20) -> some View {
+        self.modifier(LiquidGlassModifier(cornerRadius: cornerRadius))
     }
 }
 

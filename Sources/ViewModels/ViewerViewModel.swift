@@ -46,6 +46,12 @@ class ViewerViewModel: ObservableObject {
         abs(scale - 1.0) > 0.05
     }
     
+    /// 확대 상태에서 이미지 폭이 화면 폭보다 커서 좌우 패닝이 가능한지 여부
+    var canPanHorizontally: Bool {
+        guard isZoomed else { return false }
+        return maxPanOffset().width > 1.0
+    }
+    
     func getCombinedAspectRatio() -> CGFloat? {
         guard !currentPages.isEmpty else { return nil }
         var totalRatio: CGFloat = 0
@@ -297,7 +303,7 @@ class ViewerViewModel: ObservableObject {
                     self.updateCurrentPages()
                     return nil
                 }
-                if self.isZoomed {
+                if self.canPanHorizontally {
                     self.pan(dx: 100, dy: 0, animated: true)
                     return nil
                 } else {
@@ -310,7 +316,7 @@ class ViewerViewModel: ObservableObject {
                     self.updateCurrentPages()
                     return nil
                 }
-                if self.isZoomed {
+                if self.canPanHorizontally {
                     self.pan(dx: -100, dy: 0, animated: true)
                     return nil
                 } else {
