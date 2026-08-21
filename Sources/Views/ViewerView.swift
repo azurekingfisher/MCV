@@ -106,15 +106,21 @@ struct ViewerView: View {
                 }
             }
         }
+        .navigationTitle(viewModel.book.title)
         .toolbar(.hidden)
         .navigationBarBackButtonHidden(true)
         .background(WindowAccessor { window in
             window.collectionBehavior = [.fullScreenPrimary, .fullScreenAllowsTiling]
             window.styleMask.insert([.titled, .resizable, .closable, .miniaturizable])
+            window.title = viewModel.book.title
             viewModel.window = window
         })
+        .onChange(of: viewModel.book.title) { newTitle in
+            viewModel.window?.title = newTitle
+        }
         .onAppear {
             ViewerViewModel.current = viewModel
+            viewModel.window?.title = viewModel.book.title
             viewModel.installKeyMonitor {
                 dismiss()
             }
@@ -122,6 +128,7 @@ struct ViewerView: View {
         .onDisappear {
             ViewerViewModel.current = nil
             viewModel.removeKeyMonitor()
+            viewModel.window?.title = "MCV 책장"
         }
     }
     
@@ -290,52 +297,172 @@ struct ViewerView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 8)
-        .liquidGlass(cornerRadius: 22)
+        .liquidGlassCapsule()
         .padding(.horizontal, 40)
     }
 }
 
-// MARK: - Liquid Glass Style Modifier
+// MARK: - Liquid Glass Optical Lens Style Modifier (Capsule)
+struct LiquidGlassCapsuleModifier: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) var reduceTransparency
+
+    func body(content: Content) -> some View {
+        let shape = Capsule()
+
+        content
+            .background {
+                if reduceTransparency {
+                    shape
+                        .fill(Color(NSColor.windowBackgroundColor).opacity(0.95))
+                        .overlay(
+                            shape.strokeBorder(Color.black.opacity(0.15), lineWidth: 1)
+                        )
+                        .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 3)
+                } else {
+                    ZStack {
+                        // 1. 투명도를 높이고 블러를 가볍게 한 맑은 글래스 베이스 (Reduced blur / High clarity glass)
+                        shape
+                            .fill(.ultraThinMaterial.opacity(0.6))
+                        
+                        // 2. 렌즈 내부의 빛 투과 틴트 (Ambient Light Transmission Tint)
+                        shape
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.12),
+                                        Color.black.opacity(0.2)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                        
+                        // 3. 렌즈 곡면 반사 하이라이트 (Convex Lens Top Sheen)
+                        VStack(spacing: 0) {
+                            shape
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.white.opacity(0.25),
+                                            Color.white.opacity(0.04),
+                                            Color.clear
+                                        ],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                                .frame(height: 24)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    .clipShape(shape)
+                    .overlay(
+                        // 4. 완벽하게 일치하는 단일 광학 굴절 및 스페큘러 테두리 (Single Unified Specular & Optical Refraction Border)
+                        shape
+                            .strokeBorder(
+                                LinearGradient(
+                                    stops: [
+                                        .init(color: Color.white.opacity(0.95), location: 0.0),
+                                        .init(color: Color(red: 0.82, green: 0.93, blue: 1.0).opacity(0.65), location: 0.25),
+                                        .init(color: Color.white.opacity(0.15), location: 0.5),
+                                        .init(color: Color.black.opacity(0.4), location: 0.8),
+                                        .init(color: Color.white.opacity(0.35), location: 1.0)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1.2
+                            )
+                    )
+                    // 5. 다층 광학 섀도우 (Multi-layer Optical Depth Shadows)
+                    .shadow(color: .black.opacity(0.25), radius: 14, x: 0, y: 6)
+                    .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
+                }
+            }
+    }
+}
+
+// MARK: - Liquid Glass Optical Lens Style Modifier (RoundedRectangle)
 struct LiquidGlassModifier: ViewModifier {
     var cornerRadius: CGFloat = 20
     @Environment(\.accessibilityReduceTransparency) var reduceTransparency
 
     func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .circular)
+
         content
             .background {
                 if reduceTransparency {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    shape
                         .fill(Color(NSColor.windowBackgroundColor).opacity(0.95))
                         .overlay(
-                            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                                .strokeBorder(Color.black.opacity(0.15), lineWidth: 1)
+                            shape.strokeBorder(Color.black.opacity(0.15), lineWidth: 1)
                         )
                         .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 3)
                 } else {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        // macOS Liquid Glass Material
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                                .strokeBorder(
+                    ZStack {
+                        shape
+                            .fill(.ultraThinMaterial.opacity(0.6))
+                        
+                        shape
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.12),
+                                        Color.black.opacity(0.2)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                        
+                        VStack(spacing: 0) {
+                            shape
+                                .fill(
                                     LinearGradient(
                                         colors: [
-                                            Color.white.opacity(0.4),
-                                            Color.white.opacity(0.1)
+                                            Color.white.opacity(0.25),
+                                            Color.white.opacity(0.04),
+                                            Color.clear
                                         ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
                                 )
-                        )
-                        .shadow(color: .black.opacity(0.2), radius: 12, x: 0, y: 6)
+                                .frame(height: 24)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    .clipShape(shape)
+                    .overlay(
+                        shape
+                            .strokeBorder(
+                                LinearGradient(
+                                    stops: [
+                                        .init(color: Color.white.opacity(0.95), location: 0.0),
+                                        .init(color: Color(red: 0.82, green: 0.93, blue: 1.0).opacity(0.65), location: 0.25),
+                                        .init(color: Color.white.opacity(0.15), location: 0.5),
+                                        .init(color: Color.black.opacity(0.4), location: 0.8),
+                                        .init(color: Color.white.opacity(0.35), location: 1.0)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1.2
+                            )
+                    )
+                    .shadow(color: .black.opacity(0.25), radius: 14, x: 0, y: 6)
+                    .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
                 }
             }
     }
 }
 
 extension View {
+    func liquidGlassCapsule() -> some View {
+        self.modifier(LiquidGlassCapsuleModifier())
+    }
+    
     func liquidGlass(cornerRadius: CGFloat = 20) -> some View {
         self.modifier(LiquidGlassModifier(cornerRadius: cornerRadius))
     }

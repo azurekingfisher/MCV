@@ -8,6 +8,18 @@ struct ReleaseNotesView: View {
                     .font(.largeTitle)
                     .bold()
                 
+                // v1.5.3
+                versionSection(
+                    version: "v1.5.3",
+                    date: "2026.08.21",
+                    items: [
+                        "뷰어 모드 하단바를 광학 렌즈 리퀴드 글래스(Liquid Glass) 캡슐 지오메트리로 고도화 (투명도 상향 및 블러 최적화, 곡률 100% 밀착 테두리, 어두운 배경 모서리 틈새 해결)",
+                        "뷰어 모드 진입 및 권수 변경 시 상단 윈도우 타이틀바에 책 제목 실시간 표시 지원"
+                    ]
+                )
+                
+                Divider()
+                
                 // v1.5.2
                 versionSection(
                     version: "v1.5.2",
