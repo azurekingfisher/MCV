@@ -86,7 +86,7 @@ macOS 환경에서 터미널을 열고 아래 명령어를 실행합니다:
 
 ```bash
 # 레포지토리 클론
-git clone https://github.com/your-username/MCV.git
+git clone https://github.com/azurekingfisher/MCV.git
 cd MCV
 
 # .app 번들 자동 빌드 및 생성
