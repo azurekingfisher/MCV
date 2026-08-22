@@ -209,14 +209,16 @@ struct ViewerView: View {
             Spacer()
             
             // 스크러버 (타임라인)
+            let maxSliderPage = max(1, viewModel.totalPages - 1)
             Slider(
                 value: Binding(
-                    get: { Double(viewModel.currentIndex) },
+                    get: { Double(min(viewModel.currentIndex, maxSliderPage)) },
                     set: { viewModel.seek(to: Int($0)) }
                 ),
-                in: 0...Double(max(0, viewModel.totalPages - 1)),
+                in: 0...Double(maxSliderPage),
                 step: 1
             )
+            .disabled(viewModel.totalPages <= 1)
             .tint(.white)
             .padding(.horizontal)
             
