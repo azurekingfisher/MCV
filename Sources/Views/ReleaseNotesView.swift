@@ -8,6 +8,18 @@ struct ReleaseNotesView: View {
                     .font(.largeTitle)
                     .bold()
                 
+                // v1.5.4
+                versionSection(
+                    version: "v1.5.4",
+                    date: "2026.08.22",
+                    items: [
+                        "뷰어 모드에서 슬래시(/) 키로 스마트 줌 확대 시 페이지의 최상단부터 바로 보이도록 시작 위치 개선",
+                        "확대 및 가로 꽉 차기 모드에서 방향키 누르고 있을 때의 초기 지연(OS 딜레이) 완전 제거 및 고속 60fps 연속 이동 지원"
+                    ]
+                )
+                
+                Divider()
+                
                 // v1.5.3
                 versionSection(
                     version: "v1.5.3",

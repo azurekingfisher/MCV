@@ -141,9 +141,13 @@ class ViewerViewModel: ObservableObject {
         } else {
             let ratio = UserDefaults.standard.double(forKey: "smartZoomRatio")
             let targetRatio = ratio > 0 ? ratio : 2.0
+            let maxOffset = maxPanOffset(for: targetRatio)
             withAnimation(.easeOut(duration: 0.2)) {
                 self.scale = targetRatio
-                self.panOffset = .zero
+                self.panOffset = CGSize(width: 0, height: maxOffset.height)
+            }
+            if isFitToWidth {
+                scrollToTop()
             }
         }
     }
@@ -181,12 +185,17 @@ class ViewerViewModel: ObservableObject {
     // Esc 키 및 키보드 단축키 모니터
     var dismissAction: (() -> Void)?
     var scrollAction: ((CGFloat) -> Void)?
+    var scrollContinuousAction: ((CGFloat) -> Void)?
     var scrollToTopAction: (() -> Void)?
     var scrollToBottomAction: (() -> Void)?
     weak var window: NSWindow?
     private var keyMonitor: Any?
     private var scrollAccumulatorX: CGFloat = 0
     private var lastScrollTime: Date = Date()
+    
+    // 방향키 누르고 있을 때 지연(딜레이) 없는 60fps 즉시 연속 이동 지원
+    private var heldMovementKeys = Set<UInt16>()
+    private var continuousMovementTimer: Timer?
     
     init(book: ComicBook, allBooks: [ComicBook] = [], zipService: ZipArchiveServiceProtocol = ZipArchiveService()) {
         self.book = book
@@ -201,12 +210,83 @@ class ViewerViewModel: ObservableObject {
         removeKeyMonitor()
     }
     
+    private func startContinuousMovementTimer() {
+        guard continuousMovementTimer == nil else { return }
+        let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            self?.tickContinuousMovement()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        continuousMovementTimer = timer
+    }
+    
+    private func stopContinuousMovementTimer() {
+        continuousMovementTimer?.invalidate()
+        continuousMovementTimer = nil
+    }
+    
+    private func tickContinuousMovement() {
+        guard !heldMovementKeys.isEmpty else {
+            stopContinuousMovementTimer()
+            return
+        }
+        
+        let moveSpeed: CGFloat = 30.0 // 60fps 기준 프레임당 이동 픽셀 (약 1800px/sec - 빠른 연속 이동)
+        
+        if isZoomed {
+            var dx: CGFloat = 0
+            var dy: CGFloat = 0
+            
+            if heldMovementKeys.contains(123) && canPanHorizontally { // Left
+                dx += moveSpeed
+            }
+            if heldMovementKeys.contains(124) && canPanHorizontally { // Right
+                dx -= moveSpeed
+            }
+            if heldMovementKeys.contains(125) { // Down
+                dy -= moveSpeed
+            }
+            if heldMovementKeys.contains(126) { // Up
+                dy += moveSpeed
+            }
+            
+            if dx != 0 || dy != 0 {
+                pan(dx: dx, dy: dy, animated: false)
+            }
+        } else if isFitToWidth {
+            var deltaY: CGFloat = 0
+            if heldMovementKeys.contains(125) { // Down
+                deltaY += moveSpeed
+            }
+            if heldMovementKeys.contains(126) { // Up
+                deltaY -= moveSpeed
+            }
+            if deltaY != 0 {
+                scrollContinuousAction?(deltaY)
+            }
+        } else {
+            stopContinuousMovementTimer()
+            heldMovementKeys.removeAll()
+        }
+    }
+    
     func installKeyMonitor(dismissAction: @escaping () -> Void) {
         removeKeyMonitor()
         self.dismissAction = dismissAction
         
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .scrollWheel, .smartMagnify]) { [weak self] event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .scrollWheel, .smartMagnify]) { [weak self] event in
             guard let self = self else { return event }
+            
+            // --- 키를 뗐을 때 (keyUp) ---
+            if event.type == .keyUp {
+                if self.heldMovementKeys.contains(event.keyCode) {
+                    self.heldMovementKeys.remove(event.keyCode)
+                    if self.heldMovementKeys.isEmpty {
+                        self.stopContinuousMovementTimer()
+                    }
+                    return nil
+                }
+                return event
+            }
             
             // --- 스마트 줌 (두 손가락 더블 탭) ---
             if event.type == .smartMagnify {
@@ -304,7 +384,11 @@ class ViewerViewModel: ObservableObject {
                     return nil
                 }
                 if self.canPanHorizontally {
-                    self.pan(dx: 100, dy: 0, animated: true)
+                    if !self.heldMovementKeys.contains(123) {
+                        self.heldMovementKeys.insert(123)
+                        self.pan(dx: 24, dy: 0, animated: false)
+                        self.startContinuousMovementTimer()
+                    }
                     return nil
                 } else {
                     self.turnPage(forward: self.isRightToLeft)
@@ -317,7 +401,11 @@ class ViewerViewModel: ObservableObject {
                     return nil
                 }
                 if self.canPanHorizontally {
-                    self.pan(dx: -100, dy: 0, animated: true)
+                    if !self.heldMovementKeys.contains(124) {
+                        self.heldMovementKeys.insert(124)
+                        self.pan(dx: -24, dy: 0, animated: false)
+                        self.startContinuousMovementTimer()
+                    }
                     return nil
                 } else {
                     self.turnPage(forward: !self.isRightToLeft)
@@ -325,21 +413,33 @@ class ViewerViewModel: ObservableObject {
                 }
             case 125: // ↓ 아래 방향키
                 if self.isZoomed {
-                    self.pan(dx: 0, dy: -100, animated: true)
+                    if !self.heldMovementKeys.contains(125) {
+                        self.heldMovementKeys.insert(125)
+                        self.pan(dx: 0, dy: -24, animated: false)
+                        self.startContinuousMovementTimer()
+                    }
                     return nil
                 } else if self.isFitToWidth {
-                    DispatchQueue.main.async {
-                        self.scrollAction?(180)
+                    if !self.heldMovementKeys.contains(125) {
+                        self.heldMovementKeys.insert(125)
+                        self.scrollContinuousAction?(24)
+                        self.startContinuousMovementTimer()
                     }
                     return nil
                 }
             case 126: // ↑ 위 방향키
                 if self.isZoomed {
-                    self.pan(dx: 0, dy: 100, animated: true)
+                    if !self.heldMovementKeys.contains(126) {
+                        self.heldMovementKeys.insert(126)
+                        self.pan(dx: 0, dy: 24, animated: false)
+                        self.startContinuousMovementTimer()
+                    }
                     return nil
                 } else if self.isFitToWidth {
-                    DispatchQueue.main.async {
-                        self.scrollAction?(-180)
+                    if !self.heldMovementKeys.contains(126) {
+                        self.heldMovementKeys.insert(126)
+                        self.scrollContinuousAction?(-24)
+                        self.startContinuousMovementTimer()
                     }
                     return nil
                 }
@@ -457,6 +557,8 @@ class ViewerViewModel: ObservableObject {
     }
     
     func removeKeyMonitor() {
+        stopContinuousMovementTimer()
+        heldMovementKeys.removeAll()
         if let monitor = keyMonitor {
             NSEvent.removeMonitor(monitor)
             keyMonitor = nil

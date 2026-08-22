@@ -739,6 +739,21 @@ struct FitToWidthScrollView<Content: View>: NSViewRepresentable {
                 }
             }
 
+            viewModel.scrollContinuousAction = { [weak scrollView] deltaY in
+                guard let scrollView = scrollView else { return }
+                let contentView = scrollView.contentView
+                var currentPoint = contentView.bounds.origin
+                currentPoint.y += deltaY
+
+                if let documentView = scrollView.documentView {
+                    let maxY = max(0, documentView.bounds.height - contentView.bounds.height)
+                    currentPoint.y = max(0, min(currentPoint.y, maxY))
+                }
+
+                contentView.scroll(to: currentPoint)
+                scrollView.reflectScrolledClipView(contentView)
+            }
+
             viewModel.scrollToTopAction = { [weak scrollView] in
                 guard let scrollView = scrollView else { return }
                 DispatchQueue.main.async {

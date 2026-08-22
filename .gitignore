@@ -4,3 +4,5 @@
 *.xcodeproj
 Liquid Glass.md
 macOS_Comic_Viewer_Spec.md
+*.zip
+*.mp4
