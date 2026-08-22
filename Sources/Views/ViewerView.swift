@@ -134,24 +134,28 @@ struct ViewerView: View {
     
     @ViewBuilder
     private func viewerContent(geometry: GeometryProxy) -> some View {
-        let w = geometry.size.width
-        
-        ZStack {
-            // 1. 이전 페이지 (isRightToLeft면 오른쪽, 아니면 왼쪽)
-            let prevOffset: CGFloat = viewModel.isRightToLeft ? w : -w
-            pageGroupView(pages: viewModel.prevPages, geometry: geometry)
-                .offset(x: prevOffset + viewModel.swipeOffset)
-                .opacity(viewModel.isZoomed ? 0 : 1)
-            
-            // 2. 현재 페이지 (중앙)
+        if viewModel.isFitToWidth {
+            // 가로 꽉 차기 모드: 불필요한 이전/다음 페이지 생성 배제, 현재 페이지만 단독 고속 렌더링
             pageGroupView(pages: viewModel.currentPages, geometry: geometry)
-                .offset(x: viewModel.swipeOffset)
-            
-            // 3. 다음 페이지 (isRightToLeft면 왼쪽, 아니면 오른쪽)
-            let nextOffset: CGFloat = viewModel.isRightToLeft ? -w : w
-            pageGroupView(pages: viewModel.nextPages, geometry: geometry)
-                .offset(x: nextOffset + viewModel.swipeOffset)
-                .opacity(viewModel.isZoomed ? 0 : 1)
+        } else {
+            let w = geometry.size.width
+            ZStack {
+                // 1. 이전 페이지 (isRightToLeft면 오른쪽, 아니면 왼쪽)
+                let prevOffset: CGFloat = viewModel.isRightToLeft ? w : -w
+                pageGroupView(pages: viewModel.prevPages, geometry: geometry)
+                    .offset(x: prevOffset + viewModel.swipeOffset)
+                    .opacity(viewModel.isZoomed ? 0 : 1)
+                
+                // 2. 현재 페이지 (중앙)
+                pageGroupView(pages: viewModel.currentPages, geometry: geometry)
+                    .offset(x: viewModel.swipeOffset)
+                
+                // 3. 다음 페이지 (isRightToLeft면 왼쪽, 아니면 오른쪽)
+                let nextOffset: CGFloat = viewModel.isRightToLeft ? -w : w
+                pageGroupView(pages: viewModel.nextPages, geometry: geometry)
+                    .offset(x: nextOffset + viewModel.swipeOffset)
+                    .opacity(viewModel.isZoomed ? 0 : 1)
+            }
         }
     }
     
@@ -163,9 +167,9 @@ struct ViewerView: View {
             let fitHeight = geometry.size.width / combinedRatio
             HStack(spacing: 0) {
                 ForEach(pages) { page in
-                    if let image = page.image, image.size.height > 0 {
-                        LanczosImageView(image: image, sharpenIntensity: viewModel.sharpenLevel.intensity, autoContrast: viewModel.autoContrast)
-                            .aspectRatio(image.size.width / image.size.height, contentMode: .fit)
+                    if let image = page.image, page.size.height > 0 {
+                        LanczosImageView(image: image, cgImage: page.cgImage, sharpenIntensity: viewModel.sharpenLevel.intensity, autoContrast: viewModel.autoContrast)
+                            .aspectRatio(page.size.width / page.size.height, contentMode: .fit)
                     } else {
                         ProgressView()
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -186,8 +190,8 @@ struct ViewerView: View {
         guard !pages.isEmpty else { return nil }
         var totalRatio: CGFloat = 0
         for page in pages {
-            if let image = page.image, image.size.height > 0 {
-                totalRatio += image.size.width / image.size.height
+            if page.size.height > 0 {
+                totalRatio += page.size.width / page.size.height
             }
         }
         return totalRatio > 0 ? totalRatio : nil
@@ -496,35 +500,74 @@ struct WindowAccessor: NSViewRepresentable {
     }
 }
 
-// MARK: - Lanczos & Anti-Aliased High Quality Image View with GPU Processing
+// MARK: - Lanczos & Anti-Aliased High Quality Image View with GPU Hardware Layer Acceleration
 final class LanczosNSImageView: NSView {
     var image: NSImage? {
-        didSet { if image != oldValue { processImage() } }
+        didSet {
+            if image != oldValue {
+                updateImage()
+            }
+        }
+    }
+    var cgImage: CGImage? {
+        didSet {
+            if cgImage != oldValue {
+                updateImage()
+            }
+        }
     }
     var sharpenIntensity: Float = 0.0 {
-        didSet { if sharpenIntensity != oldValue { processImage() } }
+        didSet {
+            if sharpenIntensity != oldValue {
+                processImage()
+            }
+        }
     }
     var autoContrast: Bool = false {
-        didSet { if autoContrast != oldValue { processImage() } }
+        didSet {
+            if autoContrast != oldValue {
+                processImage()
+            }
+        }
     }
     
-    private var processedImage: NSImage?
     private var processingWorkItem: DispatchWorkItem?
     private static let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+    
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupLayer()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupLayer()
+    }
+    
+    private func setupLayer() {
+        self.wantsLayer = true
+        self.layerContentsRedrawPolicy = .never
+        self.layer?.contentsGravity = .resizeAspect
+        self.layer?.isOpaque = true
+    }
+    
+    private func updateImage() {
+        let baseCG = cgImage ?? image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        self.layer?.contents = baseCG
+        processImage()
+    }
     
     private func processImage() {
         processingWorkItem?.cancel()
         
-        guard let sourceImage = image else {
-            self.processedImage = nil
-            self.needsDisplay = true
+        guard let sourceCG = cgImage ?? image?.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            self.layer?.contents = nil
             return
         }
         
-        // 필터가 필요 없는 경우 원본 바로 사용
+        // 필터가 필요 없는 경우 원본 바로 사용 (0ms 지연)
         if sharpenIntensity <= 0 && !autoContrast {
-            self.processedImage = sourceImage
-            self.needsDisplay = true
+            self.layer?.contents = sourceCG
             return
         }
         
@@ -532,8 +575,7 @@ final class LanczosNSImageView: NSView {
         let applyContrast = autoContrast
         
         let workItem = DispatchWorkItem { [weak self] in
-            guard let cgImage = sourceImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
-            var ciImage = CIImage(cgImage: cgImage)
+            var ciImage = CIImage(cgImage: sourceCG)
             
             // 1. 대비 개선 필터 (Auto Contrast)
             if applyContrast {
@@ -590,13 +632,11 @@ final class LanczosNSImageView: NSView {
                 }
             }
             
-            // 3. 최종 이미지 캐싱
+            // 3. 최종 이미지 GPU 렌더링 후 레이어에 즉시 설정
             if let outputCGImage = LanczosNSImageView.ciContext.createCGImage(ciImage, from: ciImage.extent) {
-                let finalImage = NSImage(cgImage: outputCGImage, size: sourceImage.size)
                 DispatchQueue.main.async {
                     if let currentItem = self?.processingWorkItem, !currentItem.isCancelled {
-                        self?.processedImage = finalImage
-                        self?.needsDisplay = true
+                        self?.layer?.contents = outputCGImage
                     }
                 }
             }
@@ -605,30 +645,17 @@ final class LanczosNSImageView: NSView {
         self.processingWorkItem = workItem
         DispatchQueue.global(qos: .userInitiated).async(execute: workItem)
     }
-    
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        // 캐싱된 이미지가 렌더링 중이면 원본 이미지를 우선 표시
-        let displayImage = processedImage ?? image
-        guard let imageToDraw = displayImage, let context = NSGraphicsContext.current else { return }
-        
-        context.imageInterpolation = .high
-        context.shouldAntialias = true
-        
-        let targetRect = self.bounds
-        guard targetRect.width > 0 && targetRect.height > 0 else { return }
-        
-        imageToDraw.draw(in: targetRect)
-    }
 }
 
 struct LanczosImageView: NSViewRepresentable {
     let image: NSImage
+    var cgImage: CGImage? = nil
     var sharpenIntensity: Float = 0.0
     var autoContrast: Bool = false
     
     func makeNSView(context: Context) -> LanczosNSImageView {
         let view = LanczosNSImageView()
+        view.cgImage = cgImage
         view.image = image
         view.sharpenIntensity = sharpenIntensity
         view.autoContrast = autoContrast
@@ -636,7 +663,8 @@ struct LanczosImageView: NSViewRepresentable {
     }
     
     func updateNSView(_ nsView: LanczosNSImageView, context: Context) {
-        if nsView.image != image {
+        if nsView.cgImage != cgImage || nsView.image != image {
+            nsView.cgImage = cgImage
             nsView.image = image
         }
         if nsView.sharpenIntensity != sharpenIntensity {
@@ -690,9 +718,12 @@ struct FitToWidthScrollView<Content: View>: NSViewRepresentable {
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
+        scrollView.wantsLayer = true
+        scrollView.contentView.wantsLayer = true
 
         let hostingView = NSHostingView(rootView: content)
         hostingView.translatesAutoresizingMaskIntoConstraints = false
+        hostingView.wantsLayer = true
 
         scrollView.documentView = hostingView
 
@@ -732,13 +763,8 @@ struct FitToWidthScrollView<Content: View>: NSViewRepresentable {
                     currentPoint.y = max(0, min(currentPoint.y, maxY))
                 }
 
-                NSAnimationContext.runAnimationGroup { context in
-                    context.duration = 0.15
-                    context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                    contentView.animator().setBoundsOrigin(currentPoint)
-                    scrollView.reflectScrolledClipView(contentView)
-                    scrollView.flashScrollers()
-                }
+                contentView.scroll(to: currentPoint)
+                scrollView.reflectScrolledClipView(contentView)
             }
 
             viewModel.scrollContinuousAction = { [weak scrollView] deltaY in
