@@ -167,8 +167,11 @@ struct ViewerView: View {
             let fitHeight = geometry.size.width / combinedRatio
             HStack(spacing: 0) {
                 ForEach(pages) { page in
-                    if let image = page.image, page.size.height > 0 {
-                        LanczosImageView(image: image, cgImage: page.cgImage, sharpenIntensity: viewModel.sharpenLevel.intensity, autoContrast: viewModel.autoContrast)
+                    let displayCG = page.cgImage ?? page.thumbnailCGImage
+                    let displayImg = page.image ?? (displayCG != nil ? NSImage(cgImage: displayCG!, size: page.size) : nil)
+                    
+                    if let image = displayImg, page.size.height > 0 {
+                        LanczosImageView(image: image, cgImage: displayCG, sharpenIntensity: viewModel.effectiveSharpenIntensity, autoContrast: viewModel.effectiveAutoContrast)
                             .aspectRatio(page.size.width / page.size.height, contentMode: .fit)
                     } else {
                         ProgressView()
@@ -220,7 +223,10 @@ struct ViewerView: View {
                     set: { viewModel.seek(to: Int($0)) }
                 ),
                 in: 0...Double(maxSliderPage),
-                step: 1
+                step: 1,
+                onEditingChanged: { isEditing in
+                    viewModel.isScrubbing = isEditing
+                }
             )
             .disabled(viewModel.totalPages <= 1)
             .tint(.white)

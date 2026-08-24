@@ -8,6 +8,19 @@ struct ReleaseNotesView: View {
                     .font(.largeTitle)
                     .bold()
                 
+                // v1.5.6
+                versionSection(
+                    version: "v1.5.6",
+                    date: "2026.08.25",
+                    items: [
+                        "책장 모드 다중 선택 및 macOS Finder 휴지통 이동 기능 추가 (엔터키 오작동 방지 마우스 클릭 전용 확인 팝업)",
+                        "10MB 이상 대용량 이미지 고속 탐색을 위한 2단계 렌더링(Two-Tier Proxy) 파이프라인 도입",
+                        "연속 방향키 이동 및 하단바 스크롤바 드래그 시 샤픈 필터 적용 타이밍 최적화 (버튼/키를 뗐을 때 즉시 적용)"
+                    ]
+                )
+                
+                Divider()
+                
                 // v1.5.5
                 versionSection(
                     version: "v1.5.5",

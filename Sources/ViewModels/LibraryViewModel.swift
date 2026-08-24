@@ -13,6 +13,11 @@ class LibraryViewModel: ObservableObject {
     @Published var selectedIndex: Int = 0
     @Published var columnsCount: Int = 4
     
+    // 다중 선택 모드 및 휴지통 이동 관리
+    @Published var isEditMode: Bool = false
+    @Published var selectedBookIds: Set<String> = []
+    @Published var showTrashConfirmation: Bool = false
+    
     var openSelectedBookAction: ((ComicBook) -> Void)?
     private var keyMonitor: Any?
     
@@ -67,6 +72,45 @@ class LibraryViewModel: ObservableObject {
         removeKeyMonitor()
     }
     
+    func toggleEditMode() {
+        isEditMode.toggle()
+        if !isEditMode {
+            selectedBookIds.removeAll()
+            showTrashConfirmation = false
+        }
+    }
+    
+    func toggleSelection(for book: ComicBook) {
+        guard book.type != .upFolder else { return }
+        if selectedBookIds.contains(book.id) {
+            selectedBookIds.remove(book.id)
+        } else {
+            selectedBookIds.insert(book.id)
+        }
+    }
+    
+    func deleteSelectedBooksToTrash() {
+        let booksToDelete = books.filter { selectedBookIds.contains($0.id) && $0.type != .upFolder }
+        guard !booksToDelete.isEmpty else { return }
+        
+        let fileManager = FileManager.default
+        for book in booksToDelete {
+            do {
+                try fileManager.trashItem(at: book.url, resultingItemURL: nil)
+            } catch {
+                print("Failed to trash item at \(book.url.path): \(error)")
+            }
+        }
+        
+        selectedBookIds.removeAll()
+        isEditMode = false
+        showTrashConfirmation = false
+        
+        if let currentURL = selectedFolderURL {
+            scanFolder(url: currentURL)
+        }
+    }
+    
     func installKeyMonitor() {
         removeKeyMonitor()
         
@@ -76,6 +120,17 @@ class LibraryViewModel: ObservableObject {
             // 뷰어 모드가 활성화되어 있으면 책장 키 모니터는 작동하지 않고 통과시킴
             if ViewerViewModel.current != nil {
                 return event
+            }
+            
+            // 휴지통 확인 팝업이 떠 있는 경우: 엔터/스페이스 키 오작동 방지(무시), Esc로 안전하게 닫기
+            if self.showTrashConfirmation {
+                if event.keyCode == 53 { // Esc 키
+                    DispatchQueue.main.async {
+                        self.showTrashConfirmation = false
+                    }
+                }
+                // 모든 키 입력 가로채기 (실수로 엔터키를 눌러 파일이 삭제되는 것을 완벽 방지)
+                return nil
             }
             
             // Cmd + O: 폴더 열기 (책 목록이 비어있어도 책장 모드라면 즉시 동작)
@@ -110,12 +165,25 @@ class LibraryViewModel: ObservableObject {
             case 36, 76, 49: // 엔터 / 스페이스 키 (Main Enter / Keypad Enter / Space)
                 if self.selectedIndex < count {
                     let targetBook = self.books[self.selectedIndex]
-                    DispatchQueue.main.async {
-                        self.openSelectedBookAction?(targetBook)
+                    if self.isEditMode {
+                        // 선택 모드에서는 엔터/스페이스로 현재 선택 항목 체크 토글
+                        DispatchQueue.main.async {
+                            self.toggleSelection(for: targetBook)
+                        }
+                    } else {
+                        DispatchQueue.main.async {
+                            self.openSelectedBookAction?(targetBook)
+                        }
                     }
                 }
                 return nil
             case 53: // Esc 키
+                if self.isEditMode {
+                    DispatchQueue.main.async {
+                        self.toggleEditMode()
+                    }
+                    return nil
+                }
                 if self.selectedFolderURL != self.rootFolderURL {
                     if let current = self.selectedFolderURL, let root = self.rootFolderURL {
                         if current.path != root.path {
@@ -277,6 +345,9 @@ class LibraryViewModel: ObservableObject {
                 DispatchQueue.main.async {
                     self.selectedFolderURL = url
                     self.books = newBooks
+                    self.isEditMode = false
+                    self.selectedBookIds.removeAll()
+                    self.showTrashConfirmation = false
                     
                     if let prev = previousFolderURL, prev.deletingLastPathComponent().path == url.path {
                         if let targetIndex = newBooks.firstIndex(where: { $0.url.path == prev.path }) {

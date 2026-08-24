@@ -75,10 +75,10 @@ struct ViewerCommands: Commands {
             Button("MCV 정보") {
                 var options: [NSApplication.AboutPanelOptionKey: Any] = [
                     .applicationName: "MCV",
-                    .applicationVersion: "1.5.5",
-                    .version: "1.5.5",
+                    .applicationVersion: "1.5.6",
+                    .version: "1.5.6",
                     .credits: NSAttributedString(
-                        string: "macOS 만화책 뷰어 v1.5.5",
+                        string: "macOS 만화책 뷰어 v1.5.6",
                         attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]
                     )
                 ]

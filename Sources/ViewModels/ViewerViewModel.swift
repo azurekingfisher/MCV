@@ -37,6 +37,36 @@ class ViewerViewModel: ObservableObject {
         }
     }
     
+    // 빠른 탐색/스크러빙 중 초경량 프록시 사용 및 샤픈 필터 연산 지연 적용 상태
+    @Published var isFastNavigating: Bool = false {
+        didSet {
+            if !isFastNavigating && !isScrubbing {
+                loadFullResolutionForCurrentPages()
+            }
+        }
+    }
+    @Published var isScrubbing: Bool = false {
+        didSet {
+            if !isScrubbing && !isFastNavigating {
+                loadFullResolutionForCurrentPages()
+            }
+        }
+    }
+    
+    var effectiveSharpenIntensity: Float {
+        if isFastNavigating || isScrubbing {
+            return 0.0
+        }
+        return sharpenLevel.intensity
+    }
+    
+    var effectiveAutoContrast: Bool {
+        if isFastNavigating || isScrubbing {
+            return false
+        }
+        return autoContrast
+    }
+    
     // Zoom & Pan state
     @Published var scale: CGFloat = 1.0
     @Published var panOffset: CGSize = .zero
@@ -56,8 +86,8 @@ class ViewerViewModel: ObservableObject {
         guard !currentPages.isEmpty else { return nil }
         var totalRatio: CGFloat = 0
         for page in currentPages {
-            if let image = page.image, image.size.height > 0 {
-                totalRatio += image.size.width / image.size.height
+            if page.size.height > 0 {
+                totalRatio += page.size.width / page.size.height
             }
         }
         return totalRatio > 0 ? totalRatio : nil
@@ -197,6 +227,29 @@ class ViewerViewModel: ObservableObject {
     private var heldMovementKeys = Set<UInt16>()
     private var continuousMovementTimer: Timer?
     
+    // 빠른 탐색/연속 키입력 중 샤픈 필터 억제 및 버튼 뗐을 때 즉시 적용 관리
+    private var activeNavKeys = Set<UInt16>()
+    private var navSettleDebounceTimer: Timer?
+    
+    func notifyNavigationOccurred() {
+        if !isFastNavigating {
+            isFastNavigating = true
+        }
+        resetNavSettleDebounceTimer()
+    }
+    
+    private func resetNavSettleDebounceTimer() {
+        navSettleDebounceTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            if self.activeNavKeys.isEmpty && self.heldMovementKeys.isEmpty {
+                self.isFastNavigating = false
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        navSettleDebounceTimer = timer
+    }
+    
     init(book: ComicBook, allBooks: [ComicBook] = [], zipService: ZipArchiveServiceProtocol = ZipArchiveService()) {
         self.book = book
         self.allBooks = allBooks
@@ -278,14 +331,19 @@ class ViewerViewModel: ObservableObject {
             
             // --- 키를 뗐을 때 (keyUp) ---
             if event.type == .keyUp {
+                self.activeNavKeys.remove(event.keyCode)
                 if self.heldMovementKeys.contains(event.keyCode) {
                     self.heldMovementKeys.remove(event.keyCode)
                     if self.heldMovementKeys.isEmpty {
                         self.stopContinuousMovementTimer()
                     }
-                    return nil
                 }
-                return event
+                if self.activeNavKeys.isEmpty && self.heldMovementKeys.isEmpty {
+                    self.isFastNavigating = false
+                    self.navSettleDebounceTimer?.invalidate()
+                    self.navSettleDebounceTimer = nil
+                }
+                return nil
             }
             
             // --- 스마트 줌 (두 손가락 더블 탭) ---
@@ -559,6 +617,11 @@ class ViewerViewModel: ObservableObject {
     func removeKeyMonitor() {
         stopContinuousMovementTimer()
         heldMovementKeys.removeAll()
+        activeNavKeys.removeAll()
+        navSettleDebounceTimer?.invalidate()
+        navSettleDebounceTimer = nil
+        isFastNavigating = false
+        isScrubbing = false
         if let monitor = keyMonitor {
             NSEvent.removeMonitor(monitor)
             keyMonitor = nil
@@ -584,6 +647,7 @@ class ViewerViewModel: ObservableObject {
     }
     
     func turnPage(forward: Bool) {
+        notifyNavigationOccurred()
         // 현재 보여지고 있는 실제 장수를 기준으로 인덱스 이동
         let step = currentPages.count > 0 ? currentPages.count : (isTwoPageMode ? 2 : 1)
         
@@ -669,11 +733,11 @@ class ViewerViewModel: ObservableObject {
         newPages.append(page1)
         
         if isTwoPageMode {
-            if let img = page1.image, img.size.width > img.size.height {
+            if page1.size.width > page1.size.height {
                 // 가로형 스프레드 감지 (예외 처리)
             } else if index + 1 < totalPages {
                 let page2 = getPage(at: index + 1)
-                if let img2 = page2.image, img2.size.width > img2.size.height {
+                if page2.size.width > page2.size.height {
                     // 예외
                 } else {
                     newPages.append(page2)
@@ -696,18 +760,58 @@ class ViewerViewModel: ObservableObject {
         // 현재 페이지
         self.currentPages = getPages(for: currentIndex)
         
-        // 다음 페이지 (현재 표시된 페이지 수만큼 인덱스 증가)
-        let nextIdx = currentIndex + self.currentPages.count
-        self.nextPages = nextIdx < totalPages ? getPages(for: nextIdx) : []
+        // 정지 상태일 경우 즉시 고해상도 원본 로딩 실행
+        if !isFastNavigating && !isScrubbing {
+            loadFullResolutionForCurrentPages()
+        }
         
-        // 이전 페이지 (정확히 몇 페이지 이전인지 알기 어렵지만, isTwoPageMode일 땐 보통 2 감소)
-        // currentIndex는 항상 짝수/홀수 규칙을 따르므로 -step을 사용 (단, 이전 페이지가 스프레드일 수 있음)
-        let prevStep = isTwoPageMode ? 2 : 1
-        let prevIdx = currentIndex - prevStep
-        self.prevPages = prevIdx >= 0 ? getPages(for: prevIdx) : []
+        if !isFitToWidth {
+            // 다음 페이지 (현재 표시된 페이지 수만큼 인덱스 증가)
+            let nextIdx = currentIndex + self.currentPages.count
+            self.nextPages = nextIdx < totalPages ? getPages(for: nextIdx) : []
+            
+            // 이전 페이지 (정확히 몇 페이지 이전인지 알기 어렵지만, isTwoPageMode일 땐 보통 2 감소)
+            let prevStep = isTwoPageMode ? 2 : 1
+            let prevIdx = currentIndex - prevStep
+            self.prevPages = prevIdx >= 0 ? getPages(for: prevIdx) : []
+        } else {
+            self.nextPages = []
+            self.prevPages = []
+        }
         
-        // 캐시 관리
+        // 캐시 관리 & 백그라운드 프리페치
         manageCache()
+    }
+    
+    func loadFullResolutionForCurrentPages() {
+        let pagesToLoad = currentPages.filter { !$0.isFullLoaded }
+        guard !pagesToLoad.isEmpty else { return }
+        
+        let targetIndex = self.currentIndex
+        let bookUrl = self.book.url
+        
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            var updatedPages: [Int: ComicPage] = [:]
+            
+            for page in pagesToLoad {
+                var loadedPage = page
+                if !loadedPage.isFullLoaded {
+                    loadedPage.loadFullResolution()
+                    updatedPages[loadedPage.index] = loadedPage
+                }
+            }
+            
+            guard !updatedPages.isEmpty else { return }
+            
+            DispatchQueue.main.async {
+                guard self.book.url == bookUrl, self.currentIndex == targetIndex else { return }
+                for (idx, p) in updatedPages {
+                    self.pageCache[idx] = p
+                }
+                self.currentPages = self.getPages(for: self.currentIndex)
+            }
+        }
     }
     
     func scrollToTop() {
@@ -727,10 +831,15 @@ class ViewerViewModel: ObservableObject {
             return cached
         }
         
+        guard index >= 0 && index < entries.count else {
+            return ComicPage(index: index, entryName: "", imageData: nil)
+        }
+        
         let entryName = entries[index]
         do {
             let data = try zipService.extractImageData(from: book.url, entryName: entryName)
-            let page = ComicPage(index: index, entryName: entryName, imageData: data)
+            let isMovingFast = isFastNavigating || isScrubbing
+            let page = ComicPage(index: index, entryName: entryName, imageData: data, loadFullImmediately: !isMovingFast)
             pageCache[index] = page
             return page
         } catch {
@@ -740,8 +849,8 @@ class ViewerViewModel: ObservableObject {
     }
     
     private func manageCache() {
-        // 현재 인덱스 기준 앞뒤 2페이지(양면일 경우 더 넓게) 유지
-        let buffer = isTwoPageMode ? 4 : 2
+        // 현재 인덱스 기준 앞뒤 4페이지 유지
+        let buffer = isTwoPageMode ? 6 : 4
         let keepRange = (currentIndex - buffer)...(currentIndex + buffer + (isTwoPageMode ? 1 : 0))
         
         for key in pageCache.keys {
@@ -749,9 +858,46 @@ class ViewerViewModel: ObservableObject {
                 pageCache.removeValue(forKey: key)
             }
         }
+        
+        // 정지 상태일 때 인접 페이지 백그라운드 선행 로딩 (일반 독서 시 0ms 즉각 전환)
+        if !isFastNavigating && !isScrubbing {
+            let prefetchIndices = [currentIndex + 1, currentIndex + 2, currentIndex - 1].filter {
+                $0 >= 0 && $0 < totalPages && (pageCache[$0] == nil || pageCache[$0]?.isFullLoaded == false)
+            }
+            if !prefetchIndices.isEmpty {
+                let bookUrl = self.book.url
+                let entriesCopy = self.entries
+                DispatchQueue.global(qos: .utility).async { [weak self] in
+                    guard let self = self else { return }
+                    for idx in prefetchIndices {
+                        guard idx < entriesCopy.count else { continue }
+                        let entryName = entriesCopy[idx]
+                        if let cached = self.pageCache[idx] {
+                            if !cached.isFullLoaded {
+                                var fullPage = cached
+                                fullPage.loadFullResolution()
+                                DispatchQueue.main.async {
+                                    if self.book.url == bookUrl {
+                                        self.pageCache[idx] = fullPage
+                                    }
+                                }
+                            }
+                        } else if let data = try? self.zipService.extractImageData(from: bookUrl, entryName: entryName) {
+                            let prefetchedPage = ComicPage(index: idx, entryName: entryName, imageData: data, loadFullImmediately: true)
+                            DispatchQueue.main.async {
+                                if self.book.url == bookUrl && (self.pageCache[idx] == nil || self.pageCache[idx]?.isFullLoaded == false) {
+                                    self.pageCache[idx] = prefetchedPage
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
     
     func seek(to index: Int) {
+        notifyNavigationOccurred()
         guard index >= 0 && index < totalPages else { return }
         // 양면 보기일 경우 짝수/홀수 인덱스 교정 필요 (기본적으로 0부터 시작한다고 가정할때 짝수로 맞춤)
         var newIndex = index
@@ -763,6 +909,7 @@ class ViewerViewModel: ObservableObject {
     }
     
     func changeBook(forward: Bool) {
+        notifyNavigationOccurred()
         guard !allBooks.isEmpty else { return }
         guard let bookIndex = allBooks.firstIndex(where: { $0.id == book.id }) else { return }
         
