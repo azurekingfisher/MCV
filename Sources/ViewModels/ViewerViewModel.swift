@@ -31,6 +31,83 @@ class ViewerViewModel: ObservableObject {
         }
     }
     
+    // 대비 보정값 특정 페이지 고정 (Lock) 관리
+    @Published var isContrastLocked: Bool = false
+    @Published var fixedMinLuma: CGFloat? = nil
+    @Published var fixedMaxLuma: CGFloat? = nil
+    
+    func loadContrastSettings(for targetBook: ComicBook) {
+        self.autoContrast = UserDefaults.standard.bool(forKey: "autoContrast_\(targetBook.id)")
+        self.isContrastLocked = UserDefaults.standard.bool(forKey: "isContrastLocked_\(targetBook.id)")
+        if let array = UserDefaults.standard.array(forKey: "fixedContrast_\(targetBook.id)") as? [Double], array.count == 2 {
+            self.fixedMinLuma = CGFloat(array[0])
+            self.fixedMaxLuma = CGFloat(array[1])
+        } else {
+            self.fixedMinLuma = nil
+            self.fixedMaxLuma = nil
+        }
+    }
+    
+    func captureCurrentContrastValues() -> (minLuma: CGFloat, maxLuma: CGFloat)? {
+        guard let page = currentPages.first,
+              let sourceCG = page.cgImage ?? page.thumbnailCGImage else {
+            return nil
+        }
+        let ciImage = CIImage(cgImage: sourceCG)
+        let scale: CGFloat = min(200.0 / ciImage.extent.width, 200.0 / ciImage.extent.height, 1.0)
+        let scaledImage = ciImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        
+        guard let minMaxFilter = CIFilter(name: "CIAreaMinMax") else { return nil }
+        minMaxFilter.setValue(scaledImage, forKey: kCIInputImageKey)
+        minMaxFilter.setValue(CIVector(cgRect: scaledImage.extent), forKey: kCIInputExtentKey)
+        
+        guard let minMaxImage = minMaxFilter.outputImage else { return nil }
+        var pixels = [UInt8](repeating: 0, count: 8)
+        let context = CIContext(options: [.useSoftwareRenderer: false])
+        context.render(minMaxImage, toBitmap: &pixels, rowBytes: 8, bounds: CGRect(x: 0, y: 0, width: 2, height: 1), format: .RGBA8, colorSpace: nil)
+        
+        let minR = CGFloat(pixels[0]) / 255.0
+        let minG = CGFloat(pixels[1]) / 255.0
+        let minB = CGFloat(pixels[2]) / 255.0
+        let maxR = CGFloat(pixels[4]) / 255.0
+        let maxG = CGFloat(pixels[5]) / 255.0
+        let maxB = CGFloat(pixels[6]) / 255.0
+        
+        let minL = minR * 0.299 + minG * 0.587 + minB * 0.114
+        let maxL = maxR * 0.299 + maxG * 0.587 + maxB * 0.114
+        
+        if maxL > minL {
+            return (minLuma: minL, maxLuma: maxL)
+        }
+        return nil
+    }
+    
+    func toggleContrastLock() {
+        if isContrastLocked {
+            isContrastLocked = false
+            fixedMinLuma = nil
+            fixedMaxLuma = nil
+            UserDefaults.standard.set(false, forKey: "isContrastLocked_\(book.id)")
+            UserDefaults.standard.removeObject(forKey: "fixedContrast_\(book.id)")
+            showVolumeOverlay(message: "대비 보정값 고정 해제 (자동 계산)")
+        } else {
+            if !autoContrast {
+                autoContrast = true
+            }
+            if let values = captureCurrentContrastValues() {
+                isContrastLocked = true
+                fixedMinLuma = values.minLuma
+                fixedMaxLuma = values.maxLuma
+                UserDefaults.standard.set(true, forKey: "isContrastLocked_\(book.id)")
+                UserDefaults.standard.set([Double(values.minLuma), Double(values.maxLuma)], forKey: "fixedContrast_\(book.id)")
+                showVolumeOverlay(message: "현재 페이지 대비 보정값 고정 완료")
+            } else {
+                showVolumeOverlay(message: "대비 보정값을 계산할 수 없습니다")
+            }
+        }
+        self.objectWillChange.send()
+    }
+    
     @Published var prevPageZoomPosition: ZoomPrevPagePosition = ZoomPrevPagePosition(rawValue: UserDefaults.standard.string(forKey: "prevPageZoomPosition") ?? "bottom") ?? .bottom {
         didSet {
             UserDefaults.standard.set(prevPageZoomPosition.rawValue, forKey: "prevPageZoomPosition")
@@ -222,40 +299,19 @@ class ViewerViewModel: ObservableObject {
     private var keyMonitor: Any?
     private var scrollAccumulatorX: CGFloat = 0
     private var lastScrollTime: Date = Date()
+    private var keyPressedTimes: [UInt16: Date] = [:]
     
     // 방향키 누르고 있을 때 지연(딜레이) 없는 60fps 즉시 연속 이동 지원
     private var heldMovementKeys = Set<UInt16>()
     private var continuousMovementTimer: Timer?
-    
-    // 빠른 탐색/연속 키입력 중 샤픈 필터 억제 및 버튼 뗐을 때 즉시 적용 관리
     private var activeNavKeys = Set<UInt16>()
-    private var navSettleDebounceTimer: Timer?
-    
-    func notifyNavigationOccurred() {
-        if !isFastNavigating {
-            isFastNavigating = true
-        }
-        resetNavSettleDebounceTimer()
-    }
-    
-    private func resetNavSettleDebounceTimer() {
-        navSettleDebounceTimer?.invalidate()
-        let timer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { [weak self] _ in
-            guard let self = self else { return }
-            if self.activeNavKeys.isEmpty && self.heldMovementKeys.isEmpty {
-                self.isFastNavigating = false
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        navSettleDebounceTimer = timer
-    }
     
     init(book: ComicBook, allBooks: [ComicBook] = [], zipService: ZipArchiveServiceProtocol = ZipArchiveService()) {
         self.book = book
         self.allBooks = allBooks
         self.zipService = zipService
         self.currentIndex = UserDefaults.standard.integer(forKey: "bookmark_\(book.id)")
-        self.autoContrast = UserDefaults.standard.bool(forKey: "autoContrast_\(book.id)")
+        loadContrastSettings(for: book)
         loadEntries()
     }
     
@@ -331,6 +387,7 @@ class ViewerViewModel: ObservableObject {
             
             // --- 키를 뗐을 때 (keyUp) ---
             if event.type == .keyUp {
+                self.keyPressedTimes.removeValue(forKey: event.keyCode)
                 self.activeNavKeys.remove(event.keyCode)
                 if self.heldMovementKeys.contains(event.keyCode) {
                     self.heldMovementKeys.remove(event.keyCode)
@@ -338,10 +395,8 @@ class ViewerViewModel: ObservableObject {
                         self.stopContinuousMovementTimer()
                     }
                 }
-                if self.activeNavKeys.isEmpty && self.heldMovementKeys.isEmpty {
+                if self.isFastNavigating {
                     self.isFastNavigating = false
-                    self.navSettleDebounceTimer?.invalidate()
-                    self.navSettleDebounceTimer = nil
                 }
                 return nil
             }
@@ -355,8 +410,8 @@ class ViewerViewModel: ObservableObject {
             // --- 트랙패드 / 마우스 스크롤 이벤트 처리 ---
             if event.type == .scrollWheel {
                 if self.isZoomed {
-                    // 확대 상태: 패닝 (마우스 휠은 트랙패드 대비 3배 빠르게 적용: 기존 2x -> 6x)
-                    let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 2.0 : 6.0
+                    // 확대 상태: 패닝 (마우스 휠은 기존 대비 6배 빠른 12.0x 적용)
+                    let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 2.0 : 12.0
                     self.pan(dx: event.scrollingDeltaX * multiplier, dy: event.scrollingDeltaY * multiplier)
                     return nil
                 } else {
@@ -432,6 +487,30 @@ class ViewerViewModel: ObservableObject {
                     }
                 }
                 return event
+            }
+            
+            // 키를 처음 누를 때(isARepeat == false) 최초 시간 기록
+            if !event.isARepeat {
+                self.keyPressedTimes[event.keyCode] = Date()
+            }
+            
+            // 페이지 넘김 키(123:←, 124:→, 43:,, 47:.) 및 권 넘김 키(33:[, 30:])에 대해:
+            // 1번만 톡 누르는 과정에서 발생하는 찰나의 연속 반복(Bounce Repeat)만 0.20초 이내 무시하고,
+            // 계속 꾹 누르고 있을 때는 딜레이 없이 최고속으로 페이지가 넘어가도록 지원
+            let isPageOrBookNavKey = (event.keyCode == 123 && !self.canPanHorizontally) ||
+                                     (event.keyCode == 124 && !self.canPanHorizontally) ||
+                                     (event.keyCode == 43 || event.keyCode == 47 || event.keyCode == 33 || event.keyCode == 30)
+            
+            if isPageOrBookNavKey && event.isARepeat {
+                let startTime = self.keyPressedTimes[event.keyCode] ?? Date()
+                let holdDuration = Date().timeIntervalSince(startTime)
+                if holdDuration < 0.20 {
+                    return nil
+                }
+                // 꾹 누르고 있는 상태 (빠른 연속 탐색 모드 활성화)
+                if !self.isFastNavigating {
+                    self.isFastNavigating = true
+                }
             }
             
             // 1. 키코드 기반 처리 (물리적 키 위치: 한글/영문 입력기 종류에 상관없이 100% 동일하게 동작)
@@ -619,8 +698,7 @@ class ViewerViewModel: ObservableObject {
         stopContinuousMovementTimer()
         heldMovementKeys.removeAll()
         activeNavKeys.removeAll()
-        navSettleDebounceTimer?.invalidate()
-        navSettleDebounceTimer = nil
+        keyPressedTimes.removeAll()
         isFastNavigating = false
         isScrubbing = false
         if let monitor = keyMonitor {
@@ -648,7 +726,6 @@ class ViewerViewModel: ObservableObject {
     }
     
     func turnPage(forward: Bool) {
-        notifyNavigationOccurred()
         // 현재 보여지고 있는 실제 장수를 기준으로 인덱스 이동
         let step = currentPages.count > 0 ? currentPages.count : (isTwoPageMode ? 2 : 1)
         
@@ -898,7 +975,6 @@ class ViewerViewModel: ObservableObject {
     }
     
     func seek(to index: Int) {
-        notifyNavigationOccurred()
         guard index >= 0 && index < totalPages else { return }
         // 양면 보기일 경우 짝수/홀수 인덱스 교정 필요 (기본적으로 0부터 시작한다고 가정할때 짝수로 맞춤)
         var newIndex = index
@@ -910,7 +986,6 @@ class ViewerViewModel: ObservableObject {
     }
     
     func changeBook(forward: Bool) {
-        notifyNavigationOccurred()
         guard !allBooks.isEmpty else { return }
         guard let bookIndex = allBooks.firstIndex(where: { $0.id == book.id }) else { return }
         
@@ -922,7 +997,7 @@ class ViewerViewModel: ObservableObject {
             
             self.book = allBooks[nextIndex]
             self.currentIndex = 0
-            self.autoContrast = UserDefaults.standard.bool(forKey: "autoContrast_\(self.book.id)")
+            loadContrastSettings(for: self.book)
             self.loadEntries()
             
             showVolumeOverlay(message: self.book.title)

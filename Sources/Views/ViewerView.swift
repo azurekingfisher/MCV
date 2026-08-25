@@ -106,6 +106,41 @@ struct ViewerView: View {
                 }
             }
         }
+        .contextMenu {
+            Toggle("대비 개선 모드", isOn: $viewModel.autoContrast)
+            
+            Toggle("현재 페이지 대비 보정값 전체 고정", isOn: Binding(
+                get: { viewModel.isContrastLocked },
+                set: { _ in viewModel.toggleContrastLock() }
+            ))
+            .disabled(!viewModel.autoContrast)
+            
+            Divider()
+            
+            Toggle("가로로 꽉 차게 보기 (H)", isOn: $viewModel.isFitToWidth)
+            Toggle("양면 보기", isOn: $viewModel.isTwoPageMode)
+            Toggle("오른쪽에서 왼쪽으로 읽기", isOn: $viewModel.isRightToLeft)
+            if viewModel.isTwoPageMode {
+                Toggle("좌우 반전", isOn: $viewModel.isSpreadInverted)
+            }
+            
+            Divider()
+            
+            Menu("선명도 (샤픈 필터)") {
+                ForEach(SharpenLevel.allCases) { level in
+                    Button(action: {
+                        viewModel.sharpenLevel = level
+                    }) {
+                        HStack {
+                            Text(level.rawValue)
+                            if viewModel.sharpenLevel == level {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+        }
         .navigationTitle(viewModel.book.title)
         .toolbar(.hidden)
         .navigationBarBackButtonHidden(true)
@@ -128,6 +163,7 @@ struct ViewerView: View {
         .onDisappear {
             ViewerViewModel.current = nil
             viewModel.removeKeyMonitor()
+            LanczosNSImageView.clearCache()
             viewModel.window?.title = "MCV 책장"
         }
     }
@@ -169,10 +205,21 @@ struct ViewerView: View {
                 ForEach(pages) { page in
                     let displayCG = page.cgImage ?? page.thumbnailCGImage
                     let displayImg = page.image ?? (displayCG != nil ? NSImage(cgImage: displayCG!, size: page.size) : nil)
+                    let currentFixedRange: FixedContrastRange? = (viewModel.isContrastLocked && viewModel.fixedMinLuma != nil && viewModel.fixedMaxLuma != nil)
+                        ? FixedContrastRange(minLuma: viewModel.fixedMinLuma!, maxLuma: viewModel.fixedMaxLuma!)
+                        : nil
+                    let pageKey = "\(viewModel.book.id)_\(page.entryName)_\(page.isFullLoaded)_\(viewModel.effectiveSharpenIntensity)_\(viewModel.effectiveAutoContrast)_\(viewModel.fixedMinLuma ?? -1)_\(viewModel.fixedMaxLuma ?? -1)"
                     
                     if let image = displayImg, page.size.height > 0 {
-                        LanczosImageView(image: image, cgImage: displayCG, sharpenIntensity: viewModel.effectiveSharpenIntensity, autoContrast: viewModel.effectiveAutoContrast)
-                            .aspectRatio(page.size.width / page.size.height, contentMode: .fit)
+                        LanczosImageView(
+                            image: image,
+                            cgImage: displayCG,
+                            sharpenIntensity: viewModel.effectiveSharpenIntensity,
+                            autoContrast: viewModel.effectiveAutoContrast,
+                            fixedContrastRange: currentFixedRange,
+                            cacheKey: pageKey
+                        )
+                        .aspectRatio(page.size.width / page.size.height, contentMode: .fit)
                     } else {
                         ProgressView()
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -267,6 +314,12 @@ struct ViewerView: View {
                 }
                 
                 Toggle("대비 개선 모드", isOn: $viewModel.autoContrast)
+                
+                Toggle("현재 페이지 대비 보정값 전체 고정", isOn: Binding(
+                    get: { viewModel.isContrastLocked },
+                    set: { _ in viewModel.toggleContrastLock() }
+                ))
+                .disabled(!viewModel.autoContrast)
                 
                 Menu("스마트 줌 확대 비율") {
                     ForEach([1.5, 2.0, 3.0], id: \.self) { ratio in
@@ -506,6 +559,12 @@ struct WindowAccessor: NSViewRepresentable {
     }
 }
 
+// MARK: - Fixed Contrast Range Struct
+struct FixedContrastRange: Equatable {
+    let minLuma: CGFloat
+    let maxLuma: CGFloat
+}
+
 // MARK: - Lanczos & Anti-Aliased High Quality Image View with GPU Hardware Layer Acceleration
 final class LanczosNSImageView: NSView {
     var image: NSImage? {
@@ -536,9 +595,31 @@ final class LanczosNSImageView: NSView {
             }
         }
     }
+    var fixedContrastRange: FixedContrastRange? = nil {
+        didSet {
+            if fixedContrastRange != oldValue {
+                processImage()
+            }
+        }
+    }
+    var cacheKey: String? = nil {
+        didSet {
+            if cacheKey != oldValue {
+                processImage()
+            }
+        }
+    }
     
-    private var processingWorkItem: DispatchWorkItem?
     private static let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+    private static let filteredCache: NSCache<NSString, CGImage> = {
+        let cache = NSCache<NSString, CGImage>()
+        cache.countLimit = 80
+        return cache
+    }()
+    
+    static func clearCache() {
+        filteredCache.removeAllObjects()
+    }
     
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -558,36 +639,35 @@ final class LanczosNSImageView: NSView {
     }
     
     private func updateImage() {
-        let baseCG = cgImage ?? image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
-        self.layer?.contents = baseCG
         processImage()
     }
     
-    private func processImage() {
-        processingWorkItem?.cancel()
-        
-        guard let sourceCG = cgImage ?? image?.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-            self.layer?.contents = nil
-            return
+    private static func applyFilters(to sourceCG: CGImage, intensity: Float, applyContrast: Bool, fixedRange: FixedContrastRange?, cacheKey: String?) -> CGImage? {
+        if intensity <= 0 && !applyContrast {
+            return sourceCG
         }
         
-        // 필터가 필요 없는 경우 원본 바로 사용 (0ms 지연)
-        if sharpenIntensity <= 0 && !autoContrast {
-            self.layer?.contents = sourceCG
-            return
+        if let key = cacheKey, let cached = filteredCache.object(forKey: key as NSString) {
+            return cached
         }
         
-        let intensity = sharpenIntensity
-        let applyContrast = autoContrast
+        var ciImage = CIImage(cgImage: sourceCG)
         
-        let workItem = DispatchWorkItem { [weak self] in
-            var ciImage = CIImage(cgImage: sourceCG)
+        // 1. 대비 개선 필터 (Auto Contrast / Fixed Contrast)
+        if applyContrast {
+            let minLuma: CGFloat
+            let maxLuma: CGFloat
             
-            // 1. 대비 개선 필터 (Auto Contrast)
-            if applyContrast {
+            if let fixed = fixedRange {
+                minLuma = fixed.minLuma
+                maxLuma = fixed.maxLuma
+            } else {
                 // 고속 검출을 위해 다운샘플링
                 let scale: CGFloat = min(200.0 / ciImage.extent.width, 200.0 / ciImage.extent.height, 1.0)
                 let scaledImage = ciImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                
+                var detectedMin: CGFloat = 0.0
+                var detectedMax: CGFloat = 1.0
                 
                 if let minMaxFilter = CIFilter(name: "CIAreaMinMax") {
                     minMaxFilter.setValue(scaledImage, forKey: kCIInputImageKey)
@@ -604,52 +684,81 @@ final class LanczosNSImageView: NSView {
                         let maxG = CGFloat(pixels[5]) / 255.0
                         let maxB = CGFloat(pixels[6]) / 255.0
                         
-                        let minLuma = minR * 0.299 + minG * 0.587 + minB * 0.114
-                        let maxLuma = maxR * 0.299 + maxG * 0.587 + maxB * 0.114
-                        
-                        if maxLuma > minLuma {
-                            let stretchScale = 1.0 / (maxLuma - minLuma)
-                            let offset = -minLuma * stretchScale
-                            
-                            if let colorMatrix = CIFilter(name: "CIColorMatrix") {
-                                colorMatrix.setValue(ciImage, forKey: kCIInputImageKey)
-                                colorMatrix.setValue(CIVector(x: stretchScale, y: 0, z: 0, w: 0), forKey: "inputRVector")
-                                colorMatrix.setValue(CIVector(x: 0, y: stretchScale, z: 0, w: 0), forKey: "inputGVector")
-                                colorMatrix.setValue(CIVector(x: 0, y: 0, z: stretchScale, w: 0), forKey: "inputBVector")
-                                colorMatrix.setValue(CIVector(x: offset, y: offset, z: offset, w: 0), forKey: "inputBiasVector")
-                                
-                                if let output = colorMatrix.outputImage {
-                                    ciImage = output
-                                }
-                            }
-                        }
+                        detectedMin = minR * 0.299 + minG * 0.587 + minB * 0.114
+                        detectedMax = maxR * 0.299 + maxG * 0.587 + maxB * 0.114
                     }
                 }
+                minLuma = detectedMin
+                maxLuma = detectedMax
             }
             
-            // 2. 샤픈 필터
-            if intensity > 0 {
-                if let sharpenFilter = CIFilter(name: "CISharpenLuminance") {
-                    sharpenFilter.setValue(ciImage, forKey: kCIInputImageKey)
-                    sharpenFilter.setValue(intensity, forKey: kCIInputSharpnessKey)
-                    if let output = sharpenFilter.outputImage {
+            if maxLuma > minLuma {
+                let stretchScale = 1.0 / (maxLuma - minLuma)
+                let offset = -minLuma * stretchScale
+                
+                if let colorMatrix = CIFilter(name: "CIColorMatrix") {
+                    colorMatrix.setValue(ciImage, forKey: kCIInputImageKey)
+                    colorMatrix.setValue(CIVector(x: stretchScale, y: 0, z: 0, w: 0), forKey: "inputRVector")
+                    colorMatrix.setValue(CIVector(x: 0, y: stretchScale, z: 0, w: 0), forKey: "inputGVector")
+                    colorMatrix.setValue(CIVector(x: 0, y: 0, z: stretchScale, w: 0), forKey: "inputBVector")
+                    colorMatrix.setValue(CIVector(x: offset, y: offset, z: offset, w: 0), forKey: "inputBiasVector")
+                    
+                    if let output = colorMatrix.outputImage {
                         ciImage = output
-                    }
-                }
-            }
-            
-            // 3. 최종 이미지 GPU 렌더링 후 레이어에 즉시 설정
-            if let outputCGImage = LanczosNSImageView.ciContext.createCGImage(ciImage, from: ciImage.extent) {
-                DispatchQueue.main.async {
-                    if let currentItem = self?.processingWorkItem, !currentItem.isCancelled {
-                        self?.layer?.contents = outputCGImage
                     }
                 }
             }
         }
         
-        self.processingWorkItem = workItem
-        DispatchQueue.global(qos: .userInitiated).async(execute: workItem)
+        // 2. 샤픈 필터
+        if intensity > 0 {
+            if let sharpenFilter = CIFilter(name: "CISharpenLuminance") {
+                sharpenFilter.setValue(ciImage, forKey: kCIInputImageKey)
+                sharpenFilter.setValue(intensity, forKey: kCIInputSharpnessKey)
+                if let output = sharpenFilter.outputImage {
+                    ciImage = output
+                }
+            }
+        }
+        
+        // 3. 최종 이미지 GPU 렌더링 후 고유 캐시 키로 저장
+        if let outputCGImage = LanczosNSImageView.ciContext.createCGImage(ciImage, from: ciImage.extent) {
+            if let key = cacheKey {
+                filteredCache.setObject(outputCGImage, forKey: key as NSString)
+            }
+            return outputCGImage
+        }
+        return nil
+    }
+    
+    private func processImage() {
+        guard let sourceCG = cgImage ?? image?.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            self.layer?.contents = nil
+            return
+        }
+        
+        // 필터가 필요 없는 경우 원본 바로 사용 (0ms 지연)
+        if sharpenIntensity <= 0 && !autoContrast {
+            self.layer?.contents = sourceCG
+            return
+        }
+        
+        let intensity = sharpenIntensity
+        let applyContrast = autoContrast
+        let fixedRange = fixedContrastRange
+        let currentKey = cacheKey
+        
+        if let key = currentKey, let cached = LanczosNSImageView.filteredCache.object(forKey: key as NSString) {
+            self.layer?.contents = cached
+            return
+        }
+        
+        // 캐시에 없는 경우 첫 프레임부터 필터링된 이미지를 1ms 내에 즉각 생성하여 설정 (원본 노출 깜빡임 완전 방지)
+        if let filtered = LanczosNSImageView.applyFilters(to: sourceCG, intensity: intensity, applyContrast: applyContrast, fixedRange: fixedRange, cacheKey: currentKey) {
+            self.layer?.contents = filtered
+        } else {
+            self.layer?.contents = sourceCG
+        }
     }
 }
 
@@ -658,6 +767,8 @@ struct LanczosImageView: NSViewRepresentable {
     var cgImage: CGImage? = nil
     var sharpenIntensity: Float = 0.0
     var autoContrast: Bool = false
+    var fixedContrastRange: FixedContrastRange? = nil
+    var cacheKey: String? = nil
     
     func makeNSView(context: Context) -> LanczosNSImageView {
         let view = LanczosNSImageView()
@@ -665,6 +776,8 @@ struct LanczosImageView: NSViewRepresentable {
         view.image = image
         view.sharpenIntensity = sharpenIntensity
         view.autoContrast = autoContrast
+        view.fixedContrastRange = fixedContrastRange
+        view.cacheKey = cacheKey
         return view
     }
     
@@ -678,6 +791,12 @@ struct LanczosImageView: NSViewRepresentable {
         }
         if nsView.autoContrast != autoContrast {
             nsView.autoContrast = autoContrast
+        }
+        if nsView.fixedContrastRange != fixedContrastRange {
+            nsView.fixedContrastRange = fixedContrastRange
+        }
+        if nsView.cacheKey != cacheKey {
+            nsView.cacheKey = cacheKey
         }
     }
 }
