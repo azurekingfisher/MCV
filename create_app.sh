@@ -60,7 +60,7 @@ cat << 'EOF' > "${CONTENTS_DIR}/Info.plist"
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>com.igyeongseob.MCV</string>
+    <string>com.azurekingfisher.MCV</string>
     <key>CFBundleName</key>
     <string>MCV</string>
     <key>CFBundleDisplayName</key>
