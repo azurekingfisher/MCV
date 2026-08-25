@@ -355,8 +355,9 @@ class ViewerViewModel: ObservableObject {
             // --- 트랙패드 / 마우스 스크롤 이벤트 처리 ---
             if event.type == .scrollWheel {
                 if self.isZoomed {
-                    // 확대 상태: 패닝 (이동 방향은 macOS 자연스러운 스크롤 기준에 따라 기본적으로 맞음)
-                    self.pan(dx: event.scrollingDeltaX * 2, dy: event.scrollingDeltaY * 2)
+                    // 확대 상태: 패닝 (마우스 휠은 트랙패드 대비 3배 빠르게 적용: 기존 2x -> 6x)
+                    let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 2.0 : 6.0
+                    self.pan(dx: event.scrollingDeltaX * multiplier, dy: event.scrollingDeltaY * multiplier)
                     return nil
                 } else {
                     // 기본 상태: 페이지 스와이프 (가로 이동 중심)

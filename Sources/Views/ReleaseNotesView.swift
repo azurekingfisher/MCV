@@ -8,6 +8,17 @@ struct ReleaseNotesView: View {
                     .font(.largeTitle)
                     .bold()
                 
+                // v1.5.8
+                versionSection(
+                    version: "v1.5.8",
+                    date: "2026.08.26",
+                    items: [
+                        "뷰어 모드 확대 상태에서 마우스 휠(무한 휠 포함) 스크롤 이동 속도 3배 상향 최적화"
+                    ]
+                )
+                
+                Divider()
+                
                 // v1.5.7
                 versionSection(
                     version: "v1.5.7",
