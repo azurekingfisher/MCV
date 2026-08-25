@@ -8,6 +8,18 @@ struct ReleaseNotesView: View {
                     .font(.largeTitle)
                     .bold()
                 
+                // v1.5.7
+                versionSection(
+                    version: "v1.5.7",
+                    date: "2026.08.25",
+                    items: [
+                        "책장 모드에서 하위 폴더 진입 및 상위 폴더 복귀 시 썸네일 이동 애니메이션 및 불필요한 스크롤 슬라이딩 완전 제거",
+                        "상위 폴더로 복귀할 때 스크롤 지연 없이 기존 위치의 폴더 카드가 화면 중앙에 0ms 즉각 포커싱되도록 개선"
+                    ]
+                )
+                
+                Divider()
+                
                 // v1.5.6
                 versionSection(
                     version: "v1.5.6",

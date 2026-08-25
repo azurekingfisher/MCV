@@ -1,14 +1,14 @@
 #!/bin/bash
 set -e
 
-echo "=== MCV 1.5.6 .app 번들 생성 시작 ==="
+echo "=== MCV 1.5.7 .app 번들 생성 시작 ==="
 
 # 1. 릴리즈 빌드
 swift build -c release
 
 # 2. 경로 설정
 APP_NAME="MCV"
-VERSION="1.5.6"
+VERSION="1.5.7"
 BUILD_DIR=".build/release"
 APP_DIR="${APP_NAME}.app"
 CONTENTS_DIR="${APP_DIR}/Contents"
@@ -68,9 +68,9 @@ cat << 'EOF' > "${CONTENTS_DIR}/Info.plist"
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.5.6</string>
+    <string>1.5.7</string>
     <key>CFBundleVersion</key>
-    <string>1.5.6</string>
+    <string>1.5.7</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>

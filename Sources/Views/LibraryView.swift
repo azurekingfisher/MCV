@@ -53,16 +53,27 @@ struct LibraryView: View {
                                 }
                                 .padding(20)
                             }
+                            .id(viewModel.selectedFolderURL?.path ?? "root")
                             .onAppear {
                                 updateColumns(width: geometry.size.width)
+                                if viewModel.selectedIndex > 0 && viewModel.selectedIndex < viewModel.books.count {
+                                    DispatchQueue.main.async {
+                                        proxy.scrollTo(viewModel.books[viewModel.selectedIndex].id, anchor: .center)
+                                    }
+                                }
                             }
                             .onChange(of: geometry.size.width) { width in
                                 updateColumns(width: width)
                             }
-                            .onChange(of: viewModel.selectedIndex) { newIndex in
-                                if newIndex < viewModel.books.count {
+                            .onChange(of: viewModel.scrollTarget) { target in
+                                guard let target = target else { return }
+                                if target.animated {
                                     withAnimation(.easeInOut(duration: 0.15)) {
-                                        proxy.scrollTo(viewModel.books[newIndex].id, anchor: .center)
+                                        proxy.scrollTo(target.id, anchor: .center)
+                                    }
+                                } else {
+                                    DispatchQueue.main.async {
+                                        proxy.scrollTo(target.id, anchor: .center)
                                     }
                                 }
                             }

@@ -12,6 +12,17 @@ class LibraryViewModel: ObservableObject {
     @Published var isScanning: Bool = false
     @Published var selectedIndex: Int = 0
     @Published var columnsCount: Int = 4
+    @Published var scrollTarget: ScrollTarget? = nil
+    
+    struct ScrollTarget: Equatable {
+        let id: String
+        let animated: Bool
+        let uuid: UUID = UUID()
+        
+        static func == (lhs: ScrollTarget, rhs: ScrollTarget) -> Bool {
+            lhs.uuid == rhs.uuid
+        }
+    }
     
     // 다중 선택 모드 및 휴지통 이동 관리
     @Published var isEditMode: Bool = false
@@ -151,16 +162,32 @@ class LibraryViewModel: ObservableObject {
             
             switch event.keyCode {
             case 123: // ← 왼쪽 방향키
-                self.selectedIndex = max(0, self.selectedIndex - 1)
+                let newIndex = max(0, self.selectedIndex - 1)
+                self.selectedIndex = newIndex
+                if newIndex < self.books.count {
+                    self.scrollTarget = ScrollTarget(id: self.books[newIndex].id, animated: true)
+                }
                 return nil
             case 124: // → 오른쪽 방향키
-                self.selectedIndex = min(count - 1, self.selectedIndex + 1)
+                let newIndex = min(count - 1, self.selectedIndex + 1)
+                self.selectedIndex = newIndex
+                if newIndex < self.books.count {
+                    self.scrollTarget = ScrollTarget(id: self.books[newIndex].id, animated: true)
+                }
                 return nil
             case 126: // ↑ 위 방향키
-                self.selectedIndex = max(0, self.selectedIndex - columns)
+                let newIndex = max(0, self.selectedIndex - columns)
+                self.selectedIndex = newIndex
+                if newIndex < self.books.count {
+                    self.scrollTarget = ScrollTarget(id: self.books[newIndex].id, animated: true)
+                }
                 return nil
             case 125: // ↓ 아래 방향키
-                self.selectedIndex = min(count - 1, self.selectedIndex + columns)
+                let newIndex = min(count - 1, self.selectedIndex + columns)
+                self.selectedIndex = newIndex
+                if newIndex < self.books.count {
+                    self.scrollTarget = ScrollTarget(id: self.books[newIndex].id, animated: true)
+                }
                 return nil
             case 36, 76, 49: // 엔터 / 스페이스 키 (Main Enter / Keypad Enter / Space)
                 if self.selectedIndex < count {
@@ -352,11 +379,14 @@ class LibraryViewModel: ObservableObject {
                     if let prev = previousFolderURL, prev.deletingLastPathComponent().path == url.path {
                         if let targetIndex = newBooks.firstIndex(where: { $0.url.path == prev.path }) {
                             self.selectedIndex = targetIndex
+                            self.scrollTarget = ScrollTarget(id: newBooks[targetIndex].id, animated: false)
                         } else {
                             self.selectedIndex = 0
+                            self.scrollTarget = nil
                         }
                     } else {
                         self.selectedIndex = 0
+                        self.scrollTarget = nil
                     }
                     
                     self.isScanning = false
