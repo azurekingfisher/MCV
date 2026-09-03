@@ -18,7 +18,15 @@ class ViewerViewModel: ObservableObject {
     @Published var isTwoPageMode: Bool = false { didSet { updateCurrentPages() } }
     @Published var isRightToLeft: Bool = true { didSet { updateCurrentPages() } } // 만화책은 보통 우측에서 좌측으로 읽음
     @Published var isSpreadInverted: Bool = false { didSet { updateCurrentPages() } }
-    @Published var isFitToWidth: Bool = false
+    @Published var isFitToWidth: Bool = false {
+        didSet {
+            if isFitToWidth {
+                resetZoom()
+            } else {
+                updateCurrentPages()
+            }
+        }
+    }
     @Published var sharpenLevel: SharpenLevel = SharpenLevel(rawValue: UserDefaults.standard.string(forKey: "sharpenLevel") ?? "끄기") ?? .off {
         didSet {
             UserDefaults.standard.set(sharpenLevel.rawValue, forKey: "sharpenLevel")
@@ -108,6 +116,30 @@ class ViewerViewModel: ObservableObject {
         self.objectWillChange.send()
     }
     
+    func toggleTwoPageMode() {
+        isTwoPageMode.toggle()
+        showVolumeOverlay(message: isTwoPageMode ? "양면 보기" : "단면 보기")
+    }
+    
+    func toggleAutoContrast() {
+        autoContrast.toggle()
+        showVolumeOverlay(message: "대비 개선: \(autoContrast ? "켬" : "끔")")
+    }
+    
+    func cycleSharpenLevel() {
+        switch sharpenLevel {
+        case .off:
+            sharpenLevel = .low
+        case .low:
+            sharpenLevel = .medium
+        case .medium:
+            sharpenLevel = .high
+        case .high:
+            sharpenLevel = .off
+        }
+        showVolumeOverlay(message: "선명도: \(sharpenLevel.rawValue)")
+    }
+    
     @Published var prevPageZoomPosition: ZoomPrevPagePosition = ZoomPrevPagePosition(rawValue: UserDefaults.standard.string(forKey: "prevPageZoomPosition") ?? "bottom") ?? .bottom {
         didSet {
             UserDefaults.standard.set(prevPageZoomPosition.rawValue, forKey: "prevPageZoomPosition")
@@ -150,11 +182,13 @@ class ViewerViewModel: ObservableObject {
     @Published var viewportSize: CGSize = .zero
     
     var isZoomed: Bool {
-        abs(scale - 1.0) > 0.05
+        guard !isFitToWidth else { return false }
+        return abs(scale - 1.0) > 0.05
     }
     
     /// 확대 상태에서 이미지 폭이 화면 폭보다 커서 좌우 패닝이 가능한지 여부
     var canPanHorizontally: Bool {
+        guard !isFitToWidth else { return false }
         guard isZoomed else { return false }
         return maxPanOffset().width > 1.0
     }
@@ -216,6 +250,7 @@ class ViewerViewModel: ObservableObject {
     }
     
     func zoomIn() {
+        guard !isFitToWidth else { return }
         withAnimation(.easeOut(duration: 0.15)) {
             let newScale = min(4.0, scale + 0.25)
             scale = newScale
@@ -224,6 +259,7 @@ class ViewerViewModel: ObservableObject {
     }
     
     func zoomOut() {
+        guard !isFitToWidth else { return }
         withAnimation(.easeOut(duration: 0.15)) {
             let newScale = scale - 0.25
             if newScale <= 1.0 {
@@ -243,6 +279,50 @@ class ViewerViewModel: ObservableObject {
     }
     
     func toggleSmartZoom() {
+        if isFitToWidth {
+            let vSize = (viewportSize.width > 0 && viewportSize.height > 0) ? viewportSize : (window?.contentView?.frame.size ?? .zero)
+            guard let ratio = getCombinedAspectRatio(), ratio > 0, vSize.width > 0, vSize.height > 0 else {
+                isFitToWidth = false
+                resetZoom()
+                return
+            }
+            
+            let viewportRatio = vSize.width / vSize.height
+            // 세로 맞춤 기준 이미지 기본 크기 대비 가로 꽉 차기 배율 계산
+            let fitScale = max(1.0, viewportRatio / ratio)
+            let startMaxOffset = maxPanOffset(for: fitScale)
+            
+            // 현재 가로 꽉 차기 스크롤 위치 비율 반영 (상단 0.0 ~ 하단 1.0)
+            let progress = getCurrentScrollProgress?() ?? 0.0
+            let startPanY = startMaxOffset.height - progress * (2.0 * startMaxOffset.height)
+            
+            // 1. 가로 꽉 차기 화면의 크기와 오프셋과 완전히 일치하도록 scale 및 panOffset 설정
+            self.scale = fitScale
+            self.panOffset = CGSize(width: 0, height: startPanY)
+            
+            // 2. 가로 꽉 차기 모드 해제 (애니메이션 트랜잭션 없이 즉각 교체하여 크기 튐/축소 현상 방지)
+            var noAnimationTransaction = Transaction()
+            noAnimationTransaction.disablesAnimations = true
+            withTransaction(noAnimationTransaction) {
+                self.isFitToWidth = false
+            }
+            
+            // 3. 목표 스마트 줌 배율 및 오프셋 계산
+            let userRatio = UserDefaults.standard.double(forKey: "smartZoomRatio")
+            let targetRatio = userRatio > 0 ? userRatio : 2.0
+            let targetMaxOffset = maxPanOffset(for: targetRatio)
+            let targetPanY = targetMaxOffset.height - progress * (2.0 * targetMaxOffset.height)
+            
+            // 4. 다음 런루프에서 현재 배율(fitScale)에서 목표 배율(targetRatio)로 자연스럽게 확대/축소 애니메이션 진행
+            DispatchQueue.main.async {
+                withAnimation(.easeOut(duration: 0.22)) {
+                    self.scale = targetRatio
+                    self.panOffset = CGSize(width: 0, height: targetPanY)
+                }
+            }
+            return
+        }
+        
         if self.isZoomed {
             self.resetZoom()
         } else {
@@ -252,9 +332,6 @@ class ViewerViewModel: ObservableObject {
             withAnimation(.easeOut(duration: 0.2)) {
                 self.scale = targetRatio
                 self.panOffset = CGSize(width: 0, height: maxOffset.height)
-            }
-            if isFitToWidth {
-                scrollToTop()
             }
         }
     }
@@ -295,6 +372,7 @@ class ViewerViewModel: ObservableObject {
     var scrollContinuousAction: ((CGFloat) -> Void)?
     var scrollToTopAction: (() -> Void)?
     var scrollToBottomAction: (() -> Void)?
+    var getCurrentScrollProgress: (() -> CGFloat)?
     weak var window: NSWindow?
     private var keyMonitor: Any?
     private var scrollAccumulatorX: CGFloat = 0
@@ -631,6 +709,21 @@ class ViewerViewModel: ObservableObject {
                     self.isFitToWidth = true
                     return nil
                 }
+            case 39: // ' 키 (작은따옴표 / 따옴표) - 단면/양면 보기 전환
+                if !event.modifierFlags.contains(.command) {
+                    self.toggleTwoPageMode()
+                    return nil
+                }
+            case 0: // A 키 (영문 A / 한글 ㅁ) - 대비 개선 모드
+                if !event.modifierFlags.contains(.command) {
+                    self.toggleAutoContrast()
+                    return nil
+                }
+            case 1: // S 키 (영문 S / 한글 ㄴ) - 선명도(샤픈) 설정 순환 전환
+                if !event.modifierFlags.contains(.command) {
+                    self.cycleSharpenLevel()
+                    return nil
+                }
             case 33: // [ 키 (영문 [ / 한글 ㅐ) - 이전 파일
                 if !event.modifierFlags.contains(.command) {
                     self.changeBook(forward: false)
@@ -681,6 +774,27 @@ class ViewerViewModel: ObservableObject {
                     return nil
                 case "h", "ㅗ", "ㅎ":
                     self.isFitToWidth = true
+                    return nil
+                case "a", "ㅁ":
+                    self.toggleAutoContrast()
+                    return nil
+                case "s", "ㄴ":
+                    self.cycleSharpenLevel()
+                    return nil
+                case "'", "\"":
+                    self.toggleTwoPageMode()
+                    return nil
+                case "[", "{", "ㅐ":
+                    self.changeBook(forward: false)
+                    return nil
+                case "]", "}", "ㅔ":
+                    self.changeBook(forward: true)
+                    return nil
+                case ",", "<":
+                    self.turnPage(forward: self.isRightToLeft)
+                    return nil
+                case ".", ">":
+                    self.turnPage(forward: !self.isRightToLeft)
                     return nil
                 case "/", "?":
                     self.toggleSmartZoom()

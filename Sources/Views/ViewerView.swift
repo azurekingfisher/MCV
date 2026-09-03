@@ -27,8 +27,8 @@ struct ViewerView: View {
                     }
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
-                .scaleEffect(viewModel.scale)
-                .offset(viewModel.panOffset)
+                .scaleEffect(viewModel.isFitToWidth ? 1.0 : viewModel.scale)
+                .offset(viewModel.isFitToWidth ? .zero : viewModel.panOffset)
                 .onAppear {
                     viewModel.viewportSize = geometry.size
                 }
@@ -39,12 +39,14 @@ struct ViewerView: View {
                 .gesture(
                     MagnificationGesture()
                         .onChanged { value in
+                            guard !viewModel.isFitToWidth else { return }
                             let newScale = max(0.5, min(4.0, value.magnitude))
                             viewModel.scale = newScale
                             viewModel.panOffset = viewModel.clampPanOffset(viewModel.panOffset, for: newScale)
                         }
                         .simultaneously(with: DragGesture(minimumDistance: 5)
                             .onChanged { value in
+                                guard !viewModel.isFitToWidth else { return }
                                 if viewModel.isZoomed {
                                     if !isDragging {
                                         isDragging = true
@@ -107,7 +109,7 @@ struct ViewerView: View {
             }
         }
         .contextMenu {
-            Toggle("대비 개선 모드", isOn: $viewModel.autoContrast)
+            Toggle("대비 개선 모드 (A)", isOn: $viewModel.autoContrast)
             
             Toggle("현재 페이지 대비 보정값 전체 고정", isOn: Binding(
                 get: { viewModel.isContrastLocked },
@@ -118,7 +120,7 @@ struct ViewerView: View {
             Divider()
             
             Toggle("가로로 꽉 차게 보기 (H)", isOn: $viewModel.isFitToWidth)
-            Toggle("양면 보기", isOn: $viewModel.isTwoPageMode)
+            Toggle("양면 보기 (')", isOn: $viewModel.isTwoPageMode)
             Toggle("오른쪽에서 왼쪽으로 읽기", isOn: $viewModel.isRightToLeft)
             if viewModel.isTwoPageMode {
                 Toggle("좌우 반전", isOn: $viewModel.isSpreadInverted)
@@ -126,7 +128,7 @@ struct ViewerView: View {
             
             Divider()
             
-            Menu("선명도 (샤픈 필터)") {
+            Menu("선명도 (샤픈 필터) (S)") {
                 ForEach(SharpenLevel.allCases) { level in
                     Button(action: {
                         viewModel.sharpenLevel = level
@@ -290,7 +292,7 @@ struct ViewerView: View {
             // 설정 메뉴 (단면/양면, 샤픈 등)
             Menu {
                 Toggle("가로로 꽉 차게 보기 (H)", isOn: $viewModel.isFitToWidth)
-                Toggle("양면 보기", isOn: $viewModel.isTwoPageMode)
+                Toggle("양면 보기 (')", isOn: $viewModel.isTwoPageMode)
                 Toggle("오른쪽에서 왼쪽으로 읽기", isOn: $viewModel.isRightToLeft)
                 if viewModel.isTwoPageMode {
                     Toggle("좌우 반전", isOn: $viewModel.isSpreadInverted)
@@ -298,7 +300,7 @@ struct ViewerView: View {
                 
                 Divider()
                 
-                Menu("선명도 (샤픈 필터)") {
+                Menu("선명도 (샤픈 필터) (S)") {
                     ForEach(SharpenLevel.allCases) { level in
                         Button(action: {
                             viewModel.sharpenLevel = level
@@ -313,7 +315,7 @@ struct ViewerView: View {
                     }
                 }
                 
-                Toggle("대비 개선 모드", isOn: $viewModel.autoContrast)
+                Toggle("대비 개선 모드 (A)", isOn: $viewModel.autoContrast)
                 
                 Toggle("현재 페이지 대비 보정값 전체 고정", isOn: Binding(
                     get: { viewModel.isContrastLocked },
@@ -926,6 +928,15 @@ struct FitToWidthScrollView<Content: View>: NSViewRepresentable {
                         scrollView.reflectScrolledClipView(scrollView.contentView)
                     }
                 }
+            }
+            
+            viewModel.getCurrentScrollProgress = { [weak scrollView] in
+                guard let scrollView = scrollView else { return 0.0 }
+                let contentView = scrollView.contentView
+                guard let documentView = scrollView.documentView else { return 0.0 }
+                let maxY = max(0, documentView.bounds.height - contentView.bounds.height)
+                guard maxY > 0 else { return 0.0 }
+                return max(0.0, min(1.0, contentView.bounds.origin.y / maxY))
             }
         }
     }

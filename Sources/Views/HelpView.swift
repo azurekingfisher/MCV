@@ -11,10 +11,13 @@ struct HelpView: View {
                 Group {
                     Text("단축키 안내").font(.title3).bold()
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("• 방향키 (←, →): 이전/다음 페이지 넘기기")
+                        Text("• 방향키 (←, →), <, >: 이전/다음 페이지 넘기기")
                         Text("• 방향키 (↑, ↓): 확대/가로맞춤 시 상하 스크롤")
                         Text("• Space / Shift+Space: 화면 단위로 아래/위로 스크롤 (끝에서 페이지 넘김)")
                         Text("• 마우스 클릭: 화면 좌/우 클릭으로 이전/다음 페이지 넘기기")
+                        Text("• ' (작은따옴표): 단면 / 양면 보기 전환")
+                        Text("• A: 대비 개선 모드 켜기/끄기")
+                        Text("• S: 선명도(샤픈) 설정 순환 전환 (끄기 → 약하게 → 보통 → 강하게)")
                         Text("• F: 전체화면 전환")
                         Text("• V: 세로 맞춤 보기")
                         Text("• H: 가로 맞춤 보기")

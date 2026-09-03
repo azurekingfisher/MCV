@@ -75,10 +75,10 @@ struct ViewerCommands: Commands {
             Button("MCV 정보") {
                 var options: [NSApplication.AboutPanelOptionKey: Any] = [
                     .applicationName: "MCV",
-                    .applicationVersion: "1.5.8",
-                    .version: "1.5.8",
+                    .applicationVersion: "1.5.9",
+                    .version: "1.5.9",
                     .credits: NSAttributedString(
-                        string: "macOS 만화책 뷰어 v1.5.8",
+                        string: "macOS 만화책 뷰어 v1.5.9",
                         attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]
                     )
                 ]
@@ -142,6 +142,23 @@ struct ViewerCommands: Commands {
             Button("가로 맞춤 보기") {
                 ViewerViewModel.current?.isFitToWidth = true
             }
+            
+            Divider()
+            
+            Button("단면/양면 보기 전환") {
+                ViewerViewModel.current?.toggleTwoPageMode()
+            }
+            .keyboardShortcut("'", modifiers: [])
+            
+            Button("대비 개선 모드") {
+                ViewerViewModel.current?.toggleAutoContrast()
+            }
+            .keyboardShortcut("a", modifiers: [])
+            
+            Button("선명도(샤픈) 설정 전환") {
+                ViewerViewModel.current?.cycleSharpenLevel()
+            }
+            .keyboardShortcut("s", modifiers: [])
             
             Divider()
             
