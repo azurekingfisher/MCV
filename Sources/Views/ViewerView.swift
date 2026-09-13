@@ -281,7 +281,15 @@ struct ViewerView: View {
             .tint(.white)
             .padding(.horizontal)
             
-            Text("\(viewModel.currentIndex + 1) / \(viewModel.totalPages)")
+            let pageIndicatorText: String = {
+                if viewModel.isTwoPageMode && viewModel.currentPages.count == 2 {
+                    return "\(viewModel.currentIndex + 1)-\(min(viewModel.currentIndex + 2, viewModel.totalPages)) / \(viewModel.totalPages)"
+                } else {
+                    return "\(viewModel.currentIndex + 1) / \(viewModel.totalPages)"
+                }
+            }()
+            
+            Text(pageIndicatorText)
                 .foregroundColor(.white)
                 .font(.system(.body, design: .rounded).weight(.semibold))
                 .monospacedDigit()

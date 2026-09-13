@@ -595,7 +595,7 @@ class ViewerViewModel: ObservableObject {
             switch event.keyCode {
             case 123: // ← 왼쪽 방향키
                 if event.modifierFlags.contains(.command) {
-                    self.currentIndex = self.isRightToLeft ? self.totalPages - 1 : 0
+                    self.currentIndex = self.isRightToLeft ? max(0, self.totalPages - 1) : 0
                     self.updateCurrentPages()
                     return nil
                 }
@@ -612,7 +612,7 @@ class ViewerViewModel: ObservableObject {
                 }
             case 124: // → 오른쪽 방향키
                 if event.modifierFlags.contains(.command) {
-                    self.currentIndex = self.isRightToLeft ? 0 : self.totalPages - 1
+                    self.currentIndex = self.isRightToLeft ? 0 : max(0, self.totalPages - 1)
                     self.updateCurrentPages()
                     return nil
                 }
@@ -840,21 +840,23 @@ class ViewerViewModel: ObservableObject {
     }
     
     func turnPage(forward: Bool) {
-        // 현재 보여지고 있는 실제 장수를 기준으로 인덱스 이동
-        let step = currentPages.count > 0 ? currentPages.count : (isTwoPageMode ? 2 : 1)
-        
-        // 방향 계산 (isRightToLeft가 참이면 forward가 왼쪽으로 가는 것(페이지 증가))
         var nextIndex = currentIndex
         
-        if forward {
-            nextIndex += step
+        if isTwoPageMode {
+            // 두 장 보기 모드에서는 진입한 페이지를 기준으로 2장 단위로 이동
+            if forward {
+                nextIndex = currentIndex + 2
+            } else {
+                nextIndex = currentIndex - 2
+                if nextIndex < 0 && currentIndex > 0 {
+                    nextIndex = 0
+                }
+            }
         } else {
-            // 뒤로 갈 때는 무조건 앞의 짝수로 이동하되(isTwoPageMode), 정확한 이전 페이지 장수를 모를 수 있으므로 일단 2 감소 후 홀/짝 보정
-            let backStep = isTwoPageMode ? 2 : 1
-            nextIndex -= backStep
-            
-            if isTwoPageMode && nextIndex % 2 != 0 {
-                nextIndex -= 1
+            if forward {
+                nextIndex = currentIndex + 1
+            } else {
+                nextIndex = currentIndex - 1
             }
         }
         
@@ -958,11 +960,12 @@ class ViewerViewModel: ObservableObject {
         }
         
         if !isFitToWidth {
-            // 다음 페이지 (현재 표시된 페이지 수만큼 인덱스 증가)
-            let nextIdx = currentIndex + self.currentPages.count
+            // 다음 페이지 (isTwoPageMode일 땐 반드시 2장 단위, 단면일 땐 1장)
+            let nextStep = isTwoPageMode ? 2 : 1
+            let nextIdx = currentIndex + nextStep
             self.nextPages = nextIdx < totalPages ? getPages(for: nextIdx) : []
             
-            // 이전 페이지 (정확히 몇 페이지 이전인지 알기 어렵지만, isTwoPageMode일 땐 보통 2 감소)
+            // 이전 페이지 (isTwoPageMode일 땐 반드시 2장 단위, 단면일 땐 1장)
             let prevStep = isTwoPageMode ? 2 : 1
             let prevIdx = currentIndex - prevStep
             self.prevPages = prevIdx >= 0 ? getPages(for: prevIdx) : []
@@ -1090,12 +1093,7 @@ class ViewerViewModel: ObservableObject {
     
     func seek(to index: Int) {
         guard index >= 0 && index < totalPages else { return }
-        // 양면 보기일 경우 짝수/홀수 인덱스 교정 필요 (기본적으로 0부터 시작한다고 가정할때 짝수로 맞춤)
-        var newIndex = index
-        if isTwoPageMode && newIndex % 2 != 0 {
-            newIndex -= 1
-        }
-        currentIndex = newIndex
+        currentIndex = index
         updateCurrentPages()
     }
     
