@@ -8,6 +8,20 @@ struct ReleaseNotesView: View {
                     .font(.largeTitle)
                     .bold()
                 
+                // v1.6.1
+                versionSection(
+                    version: "v1.6.1",
+                    date: "2026.09.22",
+                    items: [
+                        "상단 메뉴바 MCV 항목에 '설정...'(⌘,) 메뉴 및 전용 설정 창 추가",
+                        "썸네일 캐시 실시간 사용량 확인 및 '캐시 즉시 비우기' 기능 지원",
+                        "최대 캐시 용량 직접 설정 지원: 숫자 전용 입력 필터링 및 MB/GB 단위 선택 (기본값 400MB, 초과 시 자동 정리)",
+                        "스마트 줌(/) 위치 기억 개선: 동일 페이지 내에서 확대/축소 토글 시 이전 스크롤 위치로 즉시 복원 (페이지 이동 시 초기화)"
+                    ]
+                )
+                
+                Divider()
+                
                 // v1.6.0
                 versionSection(
                     version: "v1.6.0",

@@ -19,12 +19,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { notification in
             if let window = notification.object as? NSWindow {
-                // 메뉴 창, 팝업, 헬프 검색창 등 보조 윈도우는 스타일을 수정하지 않음
+                // 메뉴 창, 팝업, 헬프 검색창, 설정 등 보조 윈도우는 스타일을 수정하지 않음
                 guard !(window is NSPanel),
                       window.level == .normal,
                       window.styleMask.contains(.titled),
                       !window.className.contains("Menu"),
-                      !window.className.contains("Pop") else { return }
+                      !window.className.contains("Pop"),
+                      window.title != "설정" else { return }
                 window.collectionBehavior = [.fullScreenPrimary, .fullScreenAllowsTiling]
                 window.styleMask.insert([.titled, .resizable, .closable, .miniaturizable])
             }
@@ -63,6 +64,11 @@ struct MCVApp: App {
         Window("개선 사항", id: "releaseNotes") {
             ReleaseNotesView()
         }
+        
+        Window("설정", id: "settings") {
+            SettingsView()
+        }
+        .windowResizability(.contentSize)
     }
 }
 
@@ -75,10 +81,10 @@ struct ViewerCommands: Commands {
             Button("MCV 정보") {
                 var options: [NSApplication.AboutPanelOptionKey: Any] = [
                     .applicationName: "MCV",
-                    .applicationVersion: "1.6.0",
-                    .version: "1.6.0",
+                    .applicationVersion: "1.6.1",
+                    .version: "1.6.1",
                     .credits: NSAttributedString(
-                        string: "macOS 만화책 뷰어 v1.6.0",
+                        string: "macOS 만화책 뷰어 v1.6.1",
                         attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]
                     )
                 ]
@@ -87,6 +93,20 @@ struct ViewerCommands: Commands {
                 }
                 NSApp.orderFrontStandardAboutPanel(options: options)
             }
+        }
+        
+        CommandGroup(replacing: .appSettings) {
+            Button("설정...") {
+                openWindow(id: "settings")
+                NSApp.activate(ignoringOtherApps: true)
+                if let window = NSApp.windows.first(where: { $0.title == "설정" }) {
+                    if window.isMiniaturized {
+                        window.deminiaturize(nil)
+                    }
+                    window.makeKeyAndOrderFront(nil)
+                }
+            }
+            .keyboardShortcut(",", modifiers: [.command])
         }
         
         CommandGroup(replacing: .newItem) {

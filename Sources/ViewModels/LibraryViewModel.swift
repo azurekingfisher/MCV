@@ -73,7 +73,7 @@ class LibraryViewModel: ObservableObject {
     private let cacheService: ThumbnailCacheServiceProtocol
     
     init(zipService: ZipArchiveServiceProtocol = ZipArchiveService(),
-         cacheService: ThumbnailCacheServiceProtocol = ThumbnailCacheService()) {
+         cacheService: ThumbnailCacheServiceProtocol = ThumbnailCacheService.shared) {
         self.zipService = zipService
         self.cacheService = cacheService
         loadLastSelectedFolder()
@@ -462,5 +462,12 @@ class LibraryViewModel: ObservableObject {
             return cacheService.getThumbnail(for: ComicBook(url: zipURL, type: .book).id)
         }
         return cacheService.getThumbnail(for: book.id)
+    }
+    
+    func reloadThumbnails() {
+        for i in 0..<books.count {
+            books[i].isThumbnailLoaded = false
+        }
+        loadThumbnails()
     }
 }

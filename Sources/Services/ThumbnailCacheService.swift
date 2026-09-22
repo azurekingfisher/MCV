@@ -5,12 +5,40 @@ protocol ThumbnailCacheServiceProtocol {
     func getThumbnail(for id: String) -> NSImage?
     func saveThumbnail(image: NSImage, for id: String)
     func cleanCacheIfNeeded()
+    func clearAllCache()
+    func getCurrentCacheSizeBytes() -> Int
+    var currentCacheLimitValue: Int { get }
+    var currentCacheLimitUnit: String { get }
+    func updateCacheLimit(value: Int, unit: String)
 }
 
 class ThumbnailCacheService: ThumbnailCacheServiceProtocol {
+    static let shared = ThumbnailCacheService()
+    
+    static let defaultLimitValue: Int = 400
+    static let defaultLimitUnit: String = "MB"
     
     private let cacheDirectory: URL
-    private let maxCacheSizeBytes: Int = 300 * 1024 * 1024 // 300 MB
+    private let cleanQueue = DispatchQueue(label: "com.MCV.ThumbnailCache.cleanQueue")
+    
+    var currentCacheLimitValue: Int {
+        let val = UserDefaults.standard.integer(forKey: "thumbnailCacheLimitValue")
+        return val > 0 ? val : ThumbnailCacheService.defaultLimitValue
+    }
+    
+    var currentCacheLimitUnit: String {
+        return UserDefaults.standard.string(forKey: "thumbnailCacheLimitUnit") ?? ThumbnailCacheService.defaultLimitUnit
+    }
+    
+    var maxCacheSizeBytes: Int {
+        let val = currentCacheLimitValue
+        let unit = currentCacheLimitUnit
+        if unit == "GB" {
+            return val * 1024 * 1024 * 1024
+        } else {
+            return val * 1024 * 1024
+        }
+    }
     
     init() {
         let fileManager = FileManager.default
@@ -24,8 +52,39 @@ class ThumbnailCacheService: ThumbnailCacheServiceProtocol {
         self.cacheDirectory = cacheDir
         
         // 앱 시작 시 백그라운드에서 오래된 캐시 정리
-        DispatchQueue.global(qos: .background).async { [weak self] in
-            self?.cleanCacheIfNeeded()
+        cleanCacheIfNeeded()
+    }
+    
+    func updateCacheLimit(value: Int, unit: String) {
+        guard value > 0 else { return }
+        UserDefaults.standard.set(value, forKey: "thumbnailCacheLimitValue")
+        UserDefaults.standard.set(unit, forKey: "thumbnailCacheLimitUnit")
+        
+        cleanCacheIfNeeded()
+    }
+    
+    func getCurrentCacheSizeBytes() -> Int {
+        let fileManager = FileManager.default
+        let resourceKeys: [URLResourceKey] = [.fileSizeKey]
+        
+        guard let enumerator = fileManager.enumerator(at: cacheDirectory, includingPropertiesForKeys: resourceKeys, options: .skipsHiddenFiles) else {
+            return 0
+        }
+        
+        var totalSize: Int = 0
+        for case let fileURL as URL in enumerator {
+            guard let resourceValues = try? fileURL.resourceValues(forKeys: Set(resourceKeys)),
+                  let fileSize = resourceValues.fileSize else { continue }
+            totalSize += fileSize
+        }
+        return totalSize
+    }
+    
+    func clearAllCache() {
+        let fileManager = FileManager.default
+        guard let enumerator = fileManager.enumerator(at: cacheDirectory, includingPropertiesForKeys: nil, options: .skipsHiddenFiles) else { return }
+        for case let fileURL as URL in enumerator {
+            try? fileManager.removeItem(at: fileURL)
         }
     }
     
@@ -73,39 +132,43 @@ class ThumbnailCacheService: ThumbnailCacheServiceProtocol {
     }
     
     func cleanCacheIfNeeded() {
-        let fileManager = FileManager.default
-        let resourceKeys: [URLResourceKey] = [.fileSizeKey, .contentAccessDateKey]
-        
-        guard let enumerator = fileManager.enumerator(at: cacheDirectory, includingPropertiesForKeys: resourceKeys, options: .skipsHiddenFiles) else { return }
-        
-        var files: [(url: URL, size: Int, accessDate: Date)] = []
-        var totalSize: Int = 0
-        
-        for case let fileURL as URL in enumerator {
-            guard let resourceValues = try? fileURL.resourceValues(forKeys: Set(resourceKeys)),
-                  let fileSize = resourceValues.fileSize else { continue }
+        cleanQueue.async { [weak self] in
+            guard let self = self else { return }
+            let fileManager = FileManager.default
+            let resourceKeys: [URLResourceKey] = [.fileSizeKey, .contentAccessDateKey]
             
-            // 만약 접근 시간이 없으면 생성 시간을 대체로 사용
-            let accessDate = resourceValues.contentAccessDate ?? Date.distantPast
+            guard let enumerator = fileManager.enumerator(at: self.cacheDirectory, includingPropertiesForKeys: resourceKeys, options: .skipsHiddenFiles) else { return }
             
-            files.append((url: fileURL, size: fileSize, accessDate: accessDate))
-            totalSize += fileSize
-        }
-        
-        // 캐시 용량이 제한(300MB)을 초과한 경우
-        if totalSize > maxCacheSizeBytes {
-            // 접근 날짜 기준 오름차순(가장 오래된 파일이 0번 인덱스) 정렬
-            files.sort { $0.accessDate < $1.accessDate }
+            var files: [(url: URL, size: Int, accessDate: Date)] = []
+            var totalSize: Int = 0
             
-            // 잦은 정리를 막기 위해 최대 용량의 70% (약 210MB)까지 비움
-            let targetSize = Int(Double(maxCacheSizeBytes) * 0.7)
-            
-            for file in files {
-                if totalSize <= targetSize { break }
-                try? fileManager.removeItem(at: file.url)
-                totalSize -= file.size
+            for case let fileURL as URL in enumerator {
+                guard let resourceValues = try? fileURL.resourceValues(forKeys: Set(resourceKeys)),
+                      let fileSize = resourceValues.fileSize else { continue }
+                
+                // 만약 접근 시간이 없으면 생성 시간을 대체로 사용
+                let accessDate = resourceValues.contentAccessDate ?? Date.distantPast
+                
+                files.append((url: fileURL, size: fileSize, accessDate: accessDate))
+                totalSize += fileSize
             }
-            print("썸네일 캐시 정리 완료: 남은 용량 \(totalSize / (1024 * 1024))MB")
+            
+            let limit = self.maxCacheSizeBytes
+            // 캐시 용량이 제한을 초과한 경우
+            if totalSize > limit {
+                // 접근 날짜 기준 오름차순(가장 오래된 파일이 0번 인덱스) 정렬
+                files.sort { $0.accessDate < $1.accessDate }
+                
+                // 잦은 정리를 막기 위해 최대 용량의 70%까지 비움
+                let targetSize = Int(Double(limit) * 0.7)
+                
+                for file in files {
+                    if totalSize <= targetSize { break }
+                    try? fileManager.removeItem(at: file.url)
+                    totalSize -= file.size
+                }
+                print("썸네일 캐시 정리 완료: 남은 용량 \(totalSize / (1024 * 1024))MB (제한: \(limit / (1024 * 1024))MB)")
+            }
         }
     }
 }

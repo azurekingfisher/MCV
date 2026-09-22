@@ -10,6 +10,9 @@ class ViewerViewModel: ObservableObject {
     @Published var currentIndex: Int = 0 {
         didSet {
             UserDefaults.standard.set(currentIndex, forKey: "bookmark_\(book.id)")
+            if currentIndex != oldValue {
+                savedSmartZoomPanOffset = nil
+            }
         }
     }
     @Published var currentPages: [ComicPage] = []
@@ -181,6 +184,9 @@ class ViewerViewModel: ObservableObject {
     @Published var panOffset: CGSize = .zero
     @Published var viewportSize: CGSize = .zero
     
+    /// 스마트 줌 토글 시 현재 페이지에서 마지막으로 확대해서 보던 위치를 기억하는 변수 (페이지 변경 시 초기화)
+    var savedSmartZoomPanOffset: CGSize?
+    
     var isZoomed: Bool {
         guard !isFitToWidth else { return false }
         return abs(scale - 1.0) > 0.05
@@ -324,14 +330,21 @@ class ViewerViewModel: ObservableObject {
         }
         
         if self.isZoomed {
+            savedSmartZoomPanOffset = self.panOffset
             self.resetZoom()
         } else {
             let ratio = UserDefaults.standard.double(forKey: "smartZoomRatio")
             let targetRatio = ratio > 0 ? ratio : 2.0
-            let maxOffset = maxPanOffset(for: targetRatio)
+            let targetOffset: CGSize
+            if let savedOffset = savedSmartZoomPanOffset {
+                targetOffset = clampPanOffset(savedOffset, for: targetRatio)
+            } else {
+                let maxOffset = maxPanOffset(for: targetRatio)
+                targetOffset = CGSize(width: 0, height: maxOffset.height)
+            }
             withAnimation(.easeOut(duration: 0.2)) {
                 self.scale = targetRatio
-                self.panOffset = CGSize(width: 0, height: maxOffset.height)
+                self.panOffset = targetOffset
             }
         }
     }
@@ -671,6 +684,7 @@ class ViewerViewModel: ObservableObject {
                 }
             case 29: // 0 키 (알파벳 상단 키패드 - 배율 초기화)
                 if !event.modifierFlags.contains(.command) {
+                    self.savedSmartZoomPanOffset = nil
                     self.resetZoom()
                     return nil
                 }
@@ -757,6 +771,7 @@ class ViewerViewModel: ObservableObject {
                     self.zoomIn()
                     return nil
                 case "0":
+                    self.savedSmartZoomPanOffset = nil
                     self.resetZoom()
                     return nil
                 case "f", "ㄹ":
@@ -815,6 +830,7 @@ class ViewerViewModel: ObservableObject {
         keyPressedTimes.removeAll()
         isFastNavigating = false
         isScrubbing = false
+        savedSmartZoomPanOffset = nil
         if let monitor = keyMonitor {
             NSEvent.removeMonitor(monitor)
             keyMonitor = nil
@@ -1106,6 +1122,7 @@ class ViewerViewModel: ObservableObject {
         if nextIndex >= 0 && nextIndex < allBooks.count {
             self.pageCache.removeAll()
             self.currentPages = []
+            self.savedSmartZoomPanOffset = nil
             
             self.book = allBooks[nextIndex]
             self.currentIndex = 0
