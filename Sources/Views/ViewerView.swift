@@ -150,6 +150,7 @@ struct ViewerView: View {
             window.collectionBehavior = [.fullScreenPrimary, .fullScreenAllowsTiling]
             window.styleMask.insert([.titled, .resizable, .closable, .miniaturizable])
             window.title = viewModel.book.title
+            window.removeTitlebarSeparator()
             viewModel.window = window
         })
         .onChange(of: viewModel.book.title) { newTitle in
@@ -158,6 +159,7 @@ struct ViewerView: View {
         .onAppear {
             ViewerViewModel.current = viewModel
             viewModel.window?.title = viewModel.book.title
+            viewModel.window?.removeTitlebarSeparator()
             viewModel.installKeyMonitor {
                 dismiss()
             }
@@ -166,7 +168,14 @@ struct ViewerView: View {
             ViewerViewModel.current = nil
             viewModel.removeKeyMonitor()
             LanczosNSImageView.clearCache()
-            viewModel.window?.title = "MCV 책장"
+            if let window = viewModel.window {
+                window.title = "MCV 책장"
+                window.removeTitlebarSeparator()
+                window.toolbar?.isVisible = true
+                DispatchQueue.main.async {
+                    window.removeTitlebarSeparator()
+                }
+            }
         }
     }
     

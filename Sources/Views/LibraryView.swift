@@ -236,6 +236,23 @@ struct LibraryView: View {
                     ViewerView(book: book, allBooks: viewModel.books)
                 }
             }
+            .background(WindowAccessor { window in
+                window.removeTitlebarSeparator()
+            })
+            .onChange(of: selectedBookForNavigation) { book in
+                if book == nil {
+                    // 만화를 보고 책장으로 복귀한 시점: 구분선 잔상 제거 및 레이아웃 강제 갱신
+                    DispatchQueue.main.async {
+                        let targetWindow = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.title == "MCV 책장" })
+                        targetWindow?.removeTitlebarSeparator()
+                        targetWindow?.toolbar?.isVisible = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        let targetWindow = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.title == "MCV 책장" })
+                        targetWindow?.removeTitlebarSeparator()
+                    }
+                }
+            }
             .onAppear {
                 LibraryViewModel.current = viewModel
                 viewModel.installKeyMonitor()

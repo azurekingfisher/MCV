@@ -8,6 +8,18 @@ struct ReleaseNotesView: View {
                     .font(.largeTitle)
                     .bold()
                 
+                // v1.6.2
+                versionSection(
+                    version: "v1.6.2",
+                    date: "2026.09.27",
+                    items: [
+                        "만화 뷰어 감상 후 책장으로 복귀 시 통합 타이틀바 상단에 수평 검은 줄(구분선 잔상)이 생기던 현상 수정",
+                        "윈도우 전역 타이틀바 구분선 비활성화 및 화면 복귀 시 타이틀바 레이아웃 강제 갱신 처리"
+                    ]
+                )
+                
+                Divider()
+                
                 // v1.6.1
                 versionSection(
                     version: "v1.6.1",

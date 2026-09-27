@@ -28,6 +28,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                       window.title != "설정" else { return }
                 window.collectionBehavior = [.fullScreenPrimary, .fullScreenAllowsTiling]
                 window.styleMask.insert([.titled, .resizable, .closable, .miniaturizable])
+                window.removeTitlebarSeparator()
             }
         }
     }
@@ -38,6 +39,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return URL(fileURLWithPath: path)
         }
         return nil
+    }
+}
+
+// MARK: - NSWindow 타이틀바 구분선(Separator) 잔상 제거 헬퍼
+extension NSWindow {
+    func removeTitlebarSeparator() {
+        self.titlebarSeparatorStyle = .none
+        
+        // titlebarContainerView 및 하위 뷰(NSTitlebarView 등) 탐색하여 구분선 잔상 뷰 숨김 및 레이아웃 갱신
+        if let titlebarContainer = self.standardWindowButton(.closeButton)?.superview?.superview {
+            func hideSeparators(in view: NSView) {
+                let className = NSStringFromClass(type(of: view))
+                if className.contains("Separator") {
+                    view.isHidden = true
+                }
+                for subview in view.subviews {
+                    hideSeparators(in: subview)
+                }
+            }
+            hideSeparators(in: titlebarContainer)
+            titlebarContainer.needsLayout = true
+            titlebarContainer.needsDisplay = true
+        }
+        self.contentView?.superview?.needsLayout = true
+        self.contentView?.superview?.needsDisplay = true
     }
 }
 
@@ -81,10 +107,10 @@ struct ViewerCommands: Commands {
             Button("MCV 정보") {
                 var options: [NSApplication.AboutPanelOptionKey: Any] = [
                     .applicationName: "MCV",
-                    .applicationVersion: "1.6.1",
-                    .version: "1.6.1",
+                    .applicationVersion: "1.6.2",
+                    .version: "1.6.2",
                     .credits: NSAttributedString(
-                        string: "macOS 만화책 뷰어 v1.6.1",
+                        string: "macOS 만화책 뷰어 v1.6.2",
                         attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]
                     )
                 ]
